@@ -1,11 +1,13 @@
+#![allow(clippy::single_match)]
+
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
     protocol::{
-        wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
-        wl_shm_pool, wl_surface,
+        wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat,
+        wl_surface,
     },
     Connection, Dispatch, Proxy, QueueHandle,
 };
@@ -103,7 +105,6 @@ struct StateInner {
     layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
     viewporter: wp_viewporter::WpViewporter,
     single_pixel_buffer_manager: wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1,
-    shm: wl_shm::WlShm,
     qh: QueueHandle<State>,
 }
 
@@ -114,11 +115,6 @@ struct State {
 
 impl State {
     fn update_idle(&mut self, is_idle: bool) {
-        let mode = if dbg!(is_idle) {
-            zwlr_output_power_v1::Mode::Off
-        } else {
-            zwlr_output_power_v1::Mode::On
-        };
         for output in &mut self.outputs {
             if is_idle {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
@@ -147,8 +143,6 @@ fn main() {
         .bind::<wl_seat::WlSeat, _, _>(&qh, 1..=1, ())
         .unwrap();
     seat.get_pointer(&qh, ()); // XXX
-
-    let shm = globals.bind::<wl_shm::WlShm, _, _>(&qh, 1..=1, ()).unwrap();
 
     let compositor = globals
         .bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=1, ())
@@ -196,7 +190,6 @@ fn main() {
             layer_shell,
             viewporter,
             single_pixel_buffer_manager,
-            shm,
             qh,
         },
         outputs,
@@ -226,7 +219,7 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
         event: ext_idle_notification_v1::Event,
         _: &(),
         _: &Connection,
-        qh: &QueueHandle<Self>,
+        _qh: &QueueHandle<Self>,
     ) {
         let is_idle = match event {
             ext_idle_notification_v1::Event::Idled => true,
@@ -244,7 +237,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for State {
         event: zwlr_layer_surface_v1::Event,
         _data: &(),
         _conn: &Connection,
-        qh: &QueueHandle<Self>,
+        _qh: &QueueHandle<Self>,
     ) {
         match event {
             zwlr_layer_surface_v1::Event::Configure {
@@ -280,11 +273,10 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
         match event {
             wl_pointer::Event::Enter {
                 serial,
-                surface,
-                surface_x,
-                surface_y,
+                surface: _,
+                surface_x: _,
+                surface_y: _,
             } => {
-                println!("set_cursor");
                 pointer.set_cursor(serial, None, 0, 0);
             }
             _ => {}
@@ -302,7 +294,7 @@ impl Dispatch<wl_callback::WlCallback, wl_surface::WlSurface> for State {
         _qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_callback::Event::Done { callback_data } => {
+            wl_callback::Event::Done { callback_data: _ } => {
                 for output in &mut state.outputs {
                     if let Some(fade_surface) = &mut output.fade_surface {
                         if &fade_surface.surface == surface {
@@ -331,8 +323,6 @@ delegate_noop!(State: ext_idle_notifier_v1::ExtIdleNotifierV1);
 delegate_noop!(State: ignore wl_seat::WlSeat); // XXX
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
 delegate_noop!(State: ignore wl_surface::WlSurface);
-delegate_noop!(State: ignore wl_shm::WlShm);
-delegate_noop!(State: wl_shm_pool::WlShmPool);
 delegate_noop!(State: zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(State: wp_viewporter::WpViewporter);
 delegate_noop!(State: wp_viewport::WpViewport);
