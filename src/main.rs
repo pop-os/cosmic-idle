@@ -1,5 +1,4 @@
 use keyframe::{ease, functions::EaseInOut};
-use rustix::fd::AsFd;
 use std::time::{Duration, Instant};
 use wayland_client::{
     delegate_noop,
@@ -72,26 +71,10 @@ impl FadeBlackSurface {
     fn update(&self, inner: &StateInner) {
         let time = self.started.elapsed().as_secs_f64() / FADE_TIME.as_secs_f64();
         let alpha = ease(EaseInOut, 0., u32::MAX as f64, time) as u32;
-        //let alpha_u8 = ease(EaseOut, 0., u8::MAX as f64, time) as u8;
-        //dbg!(time, alpha);
-        // XXX is shm buffer different?
-        /*
-           let fd = rustix::fs::memfd_create("shm buffer", rustix::fs::MemfdFlags::CLOEXEC).unwrap();
-           rustix::io::write(&fd, &[0, 0, 0, alpha_u8]).unwrap();
-           let pool = inner.shm.create_pool(fd.as_fd(), 4, &inner.qh, ());
-           let buffer = pool.create_buffer(0, 1, 1, 4, wl_shm::Format::Argb8888, &inner.qh, ());
-           pool.destroy();
-           */
         let buffer =
             inner
-            .single_pixel_buffer_manager
-            .create_u32_rgba_buffer(0, 0, 0, alpha, &inner.qh, ());
-        /*
-           let buffer =
-           inner
-           .single_pixel_buffer_manager
-           .create_u32_rgba_buffer(0, 0, 0, u32::MAX / 2, &inner.qh, ());
-           */
+                .single_pixel_buffer_manager
+                .create_u32_rgba_buffer(0, 0, 0, alpha, &inner.qh, ());
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.frame(&inner.qh, self.surface.clone());
         self.surface.damage(0, 0, i32::MAX, i32::MAX);
