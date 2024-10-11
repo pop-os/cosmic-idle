@@ -26,6 +26,7 @@ use wayland_protocols_wlr::{
 const IDLE_TIME: u32 = 3000;
 const FADE_TIME: Duration = Duration::from_millis(2000);
 
+#[derive(Debug)]
 struct FadeBlackSurface {
     surface: wl_surface::WlSurface,
     layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
@@ -93,10 +94,12 @@ impl Drop for FadeBlackSurface {
     }
 }
 
+#[derive(Debug)]
 struct Output {
     output: wl_output::WlOutput,
     output_power: zwlr_output_power_v1::ZwlrOutputPowerV1,
     fade_surface: Option<FadeBlackSurface>,
+    global_name: u32,
 }
 
 struct StateInner {
@@ -170,12 +173,13 @@ fn main() {
             .map(|global| {
                 let output = globals
                     .registry()
-                    .bind(global.name, global.version, &qh, ());
+                    .bind(global.name, global.version.min(3), &qh, ());
                 let output_power = output_power_manager.get_output_power(&output, &qh, ());
                 Output {
                     output,
                     output_power,
                     fade_surface: None,
+                    global_name: global.name,
                 }
             })
             .collect()
@@ -201,14 +205,39 @@ fn main() {
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
     fn event(
-        _: &mut Self,
-        _: &wl_registry::WlRegistry,
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
         event: wl_registry::Event,
         _: &GlobalListContents,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
-        dbg!(event);
+        match event {
+            wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } => {
+                if interface == "wl_output" {
+                    let output = registry.bind(name, version.min(3), qh, ());
+                    let output_power =
+                        state
+                            .inner
+                            .output_power_manager
+                            .get_output_power(&output, &qh, ());
+                    state.outputs.push(Output {
+                        output,
+                        output_power,
+                        fade_surface: None,
+                        global_name: name,
+                    });
+                }
+            }
+            wl_registry::Event::GlobalRemove { name } => {
+                state.outputs.retain(|output| output.global_name != name);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -254,7 +283,6 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for State {
                         }
                     }
                 }
-                dbg!(width, height);
             }
             _ => {}
         }
