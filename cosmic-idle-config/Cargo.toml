@@ -1,0 +1,8 @@
+[package]
+name = "cosmic-idle-config"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
+serde = { version = "1.0.210", features = ["derive"] }

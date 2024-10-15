@@ -9,3 +9,10 @@ rustix = { version = "0.38.34", features = ["fs"] }
 wayland-client = "0.31.5"
 wayland-protocols = { version = "0.32.3", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3.3", features = ["client"] }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic" }
+cosmic-idle-config = { path = "./cosmic-idle-config" }
+
+[workspace]
+members = [
+    "cosmic-idle-config"
+]
