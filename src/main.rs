@@ -114,6 +114,7 @@ struct StateInner {
 struct State {
     inner: StateInner,
     outputs: Vec<Output>,
+    _idle_notification: ext_idle_notification_v1::ExtIdleNotificationV1,
 }
 
 impl State {
@@ -185,7 +186,7 @@ fn main() {
             .collect()
     });
 
-    idle_notifier.get_idle_notification(IDLE_TIME, &seat, &qh, ());
+    let _idle_notification = idle_notifier.get_idle_notification(IDLE_TIME, &seat, &qh, ());
 
     let mut state = State {
         inner: StateInner {
@@ -196,6 +197,7 @@ fn main() {
             single_pixel_buffer_manager,
             qh,
         },
+        _idle_notification,
         outputs,
     };
     loop {
