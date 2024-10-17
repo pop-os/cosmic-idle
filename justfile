@@ -12,9 +12,6 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 bin-src := cargo-target-dir / 'release' / name
 bin-dst := base-dir / 'bin' / name
 
-daemon-src := cargo-target-dir / 'release' / name + '-daemon'
-daemon-dst := base-dir / 'bin' / name + '-daemon'
-
 # Default recipe which runs `just build-release`
 default: build-release
 
@@ -53,7 +50,6 @@ run *args:
 
 install:
     install -Dm0755 {{bin-src}} {{bin-dst}}
-    install -Dm0755 {{daemon-src}} {{daemon-dst}}
 
 # Uninstalls installed files
 uninstall:
