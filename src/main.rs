@@ -1,5 +1,7 @@
 #![allow(clippy::single_match)]
 
+use calloop::EventLoop;
+use calloop_wayland_source::WaylandSource;
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -132,7 +134,7 @@ impl State {
 
 fn main() {
     let connection = Connection::connect_to_env().unwrap();
-    let (globals, mut event_queue) = registry_queue_init::<State>(&connection).unwrap();
+    let (globals, event_queue) = registry_queue_init::<State>(&connection).unwrap();
     let qh = event_queue.handle();
 
     let output_power_manager = globals
@@ -200,9 +202,12 @@ fn main() {
         _idle_notification,
         outputs,
     };
-    loop {
-        event_queue.blocking_dispatch(&mut state).unwrap();
-    }
+
+    let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
+    WaylandSource::new(connection, event_queue)
+        .insert(event_loop.handle())
+        .unwrap();
+    while let Ok(_) = event_loop.dispatch(None, &mut state) {}
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {

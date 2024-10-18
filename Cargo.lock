@@ -170,6 +170,8 @@ dependencies = [
 name = "cosmic-idle"
 version = "0.1.0"
 dependencies = [
+ "calloop",
+ "calloop-wayland-source",
  "cosmic-config",
  "cosmic-idle-config",
  "keyframe",
