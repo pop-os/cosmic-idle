@@ -2,6 +2,8 @@
 
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
+use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
+use cosmic_idle_config::CosmicIdleConfig;
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -25,7 +27,6 @@ use wayland_protocols_wlr::{
     output_power_management::v1::client::{zwlr_output_power_manager_v1, zwlr_output_power_v1},
 };
 
-const IDLE_TIME: u32 = 3000;
 const FADE_TIME: Duration = Duration::from_millis(2000);
 
 #[derive(Debug)]
@@ -110,13 +111,16 @@ struct StateInner {
     layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
     viewporter: wp_viewporter::WpViewporter,
     single_pixel_buffer_manager: wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1,
+    idle_notifier: ext_idle_notifier_v1::ExtIdleNotifierV1,
+    seat: wl_seat::WlSeat,
     qh: QueueHandle<State>,
 }
 
 struct State {
     inner: StateInner,
     outputs: Vec<Output>,
-    _idle_notification: ext_idle_notification_v1::ExtIdleNotificationV1,
+    conf: CosmicIdleConfig,
+    idle_notification: ext_idle_notification_v1::ExtIdleNotificationV1,
 }
 
 impl State {
@@ -129,6 +133,17 @@ impl State {
                 output.output_power.set_mode(zwlr_output_power_v1::Mode::On);
             }
         }
+    }
+
+    fn recreate_notification(&mut self) {
+        self.idle_notification.destroy();
+        self.idle_notification = self.inner.idle_notifier.get_idle_notification(
+            self.conf.screen_off_time,
+            &self.inner.seat,
+            &self.inner.qh,
+            (),
+        );
+        self.update_idle(false);
     }
 }
 
@@ -188,7 +203,11 @@ fn main() {
             .collect()
     });
 
-    let _idle_notification = idle_notifier.get_idle_notification(IDLE_TIME, &seat, &qh, ());
+    let config = cosmic_config::Config::new("com.system76.CosmicIdle", 1).unwrap();
+    let conf = CosmicIdleConfig::get_entry(&config).unwrap_or_else(|(_, conf)| conf);
+
+    let idle_notification =
+        idle_notifier.get_idle_notification(conf.screen_off_time, &seat, &qh, ());
 
     let mut state = State {
         inner: StateInner {
@@ -197,16 +216,28 @@ fn main() {
             layer_shell,
             viewporter,
             single_pixel_buffer_manager,
+            idle_notifier,
+            seat,
             qh,
         },
-        _idle_notification,
+        idle_notification,
         outputs,
+        conf,
     };
 
     let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
     WaylandSource::new(connection, event_queue)
         .insert(event_loop.handle())
         .unwrap();
+    if let Ok(source) = ConfigWatchSource::new(&config) {
+        event_loop
+            .handle()
+            .insert_source(source, |(config, keys), _, state| {
+                state.conf.update_keys(&config, &keys);
+                state.recreate_notification();
+            })
+            .unwrap();
+    }
     while let Ok(_) = event_loop.dispatch(None, &mut state) {}
 }
 
