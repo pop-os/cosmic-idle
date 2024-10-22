@@ -152,6 +152,8 @@ impl State {
 }
 
 fn main() {
+    env_logger::init();
+
     let connection = Connection::connect_to_env().unwrap();
     let (globals, event_queue) = registry_queue_init::<State>(&connection).unwrap();
     let qh = event_queue.handle();
@@ -208,7 +210,12 @@ fn main() {
     });
 
     let config = cosmic_config::Config::new("com.system76.CosmicIdle", 1).unwrap();
-    let conf = CosmicIdleConfig::get_entry(&config).unwrap_or_else(|(_, conf)| conf);
+    let conf = CosmicIdleConfig::get_entry(&config).unwrap_or_else(|(errs, conf)| {
+        for err in errs {
+            log::error!("Loading config: {}", err);
+        }
+        conf
+    });
 
     let mut state = State {
         inner: StateInner {

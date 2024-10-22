@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 keyframe = "1.1.1"
-rustix = { version = "0.38.34", features = ["fs"] }
 wayland-client = "0.31.5"
 wayland-protocols = { version = "0.32.3", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3.3", features = ["client"] }
@@ -13,6 +12,8 @@ cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = ["call
 cosmic-idle-config = { path = "./cosmic-idle-config" }
 calloop = "0.14.0"
 calloop-wayland-source = "0.4.0"
+log = "0.4.22"
+env_logger = "0.11.5"
 
 [workspace]
 members = [
