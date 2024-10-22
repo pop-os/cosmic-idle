@@ -120,7 +120,7 @@ struct State {
     inner: StateInner,
     outputs: Vec<Output>,
     conf: CosmicIdleConfig,
-    idle_notification: ext_idle_notification_v1::ExtIdleNotificationV1,
+    idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
 }
 
 impl State {
@@ -136,13 +136,17 @@ impl State {
     }
 
     fn recreate_notification(&mut self) {
-        self.idle_notification.destroy();
-        self.idle_notification = self.inner.idle_notifier.get_idle_notification(
-            self.conf.screen_off_time,
-            &self.inner.seat,
-            &self.inner.qh,
-            (),
-        );
+        if let Some(idle_notification) = self.idle_notification.take() {
+            idle_notification.destroy();
+        }
+        if let Some(time) = self.conf.screen_off_time {
+            self.idle_notification = Some(self.inner.idle_notifier.get_idle_notification(
+                time,
+                &self.inner.seat,
+                &self.inner.qh,
+                (),
+            ));
+        }
         self.update_idle(false);
     }
 }
@@ -206,9 +210,6 @@ fn main() {
     let config = cosmic_config::Config::new("com.system76.CosmicIdle", 1).unwrap();
     let conf = CosmicIdleConfig::get_entry(&config).unwrap_or_else(|(_, conf)| conf);
 
-    let idle_notification =
-        idle_notifier.get_idle_notification(conf.screen_off_time, &seat, &qh, ());
-
     let mut state = State {
         inner: StateInner {
             compositor,
@@ -220,10 +221,11 @@ fn main() {
             seat,
             qh,
         },
-        idle_notification,
+        idle_notification: None,
         outputs,
         conf,
     };
+    state.recreate_notification();
 
     let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
     WaylandSource::new(connection, event_queue)
