@@ -1,11 +1,13 @@
 #![allow(clippy::single_match)]
 
-use calloop::EventLoop;
+use calloop::{channel, EventLoop};
 use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
+use futures_lite::stream::StreamExt;
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
+use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
@@ -28,6 +30,21 @@ use wayland_protocols_wlr::{
 };
 
 const FADE_TIME: Duration = Duration::from_millis(2000);
+
+#[derive(Debug)]
+enum Event {
+    OnBattery(bool),
+}
+
+async fn receive_battery_task(sender: channel::Sender<Event>) -> zbus::Result<()> {
+    let connection = zbus::Connection::system().await?;
+    let upower = UPowerProxy::new(&connection).await?;
+    let mut stream = upower.receive_on_battery_changed().await;
+    while let Some(event) = stream.next().await {
+        let _ = sender.send(Event::OnBattery(event.get().await?));
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 struct FadeBlackSurface {
@@ -149,6 +166,12 @@ impl State {
         }
         self.update_idle(false);
     }
+
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::OnBattery(_value) => {}
+        }
+    }
 }
 
 fn main() {
@@ -235,9 +258,11 @@ fn main() {
     state.recreate_notification();
 
     let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
+
     WaylandSource::new(connection, event_queue)
         .insert(event_loop.handle())
         .unwrap();
+
     if let Ok(source) = ConfigWatchSource::new(&config) {
         event_loop
             .handle()
@@ -247,6 +272,29 @@ fn main() {
             })
             .unwrap();
     }
+
+    let (executor, scheduler) = calloop::futures::executor().unwrap();
+    let (sender, receiver) = channel::channel();
+    scheduler
+        .schedule(async move {
+            if let Err(err) = receive_battery_task(sender).await {
+                log::error!("Getting battery status from upower: {}", err);
+            }
+        })
+        .unwrap();
+    event_loop
+        .handle()
+        .insert_source(executor, |_, _, _| {})
+        .unwrap();
+    event_loop
+        .handle()
+        .insert_source(receiver, |event, _, state| {
+            if let channel::Event::Msg(event) = event {
+                state.handle_event(event);
+            }
+        })
+        .unwrap();
+
     while let Ok(_) = event_loop.dispatch(None, &mut state) {}
 }
 
