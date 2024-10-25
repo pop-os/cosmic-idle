@@ -41,6 +41,7 @@ enum Event {
 
 struct IdleNotification {
     notification: ext_idle_notification_v1::ExtIdleNotificationV1,
+    time: u32,
 }
 
 impl IdleNotification {
@@ -49,7 +50,7 @@ impl IdleNotification {
             inner
                 .idle_notifier
                 .get_idle_notification(time, &inner.seat, &inner.qh, ());
-        Self { notification }
+        Self { notification, time }
     }
 }
 
@@ -191,23 +192,27 @@ impl State {
     }
 
     fn recreate_notification(&mut self) {
-        self.screen_off_idle_notification = if let Some(time) = self.conf.screen_off_time {
-            Some(IdleNotification::new(&self.inner, time))
-        } else {
-            None
-        };
+        if self.screen_off_idle_notification.as_ref().map(|x| x.time) != self.conf.screen_off_time {
+            self.screen_off_idle_notification = if let Some(time) = self.conf.screen_off_time {
+                Some(IdleNotification::new(&self.inner, time))
+            } else {
+                None
+            };
+            self.update_screen_off_idle(false);
+        }
         let suspend_time = if self.on_battery {
             self.conf.suspend_on_battery_time
         } else {
             self.conf.suspend_on_ac_time
         };
-        self.suspend_idle_notification = if let Some(time) = suspend_time {
-            Some(IdleNotification::new(&self.inner, time))
-        } else {
-            None
-        };
-        self.update_screen_off_idle(false);
-        self.update_suspend_idle(false);
+        if self.suspend_idle_notification.as_ref().map(|x| x.time) != suspend_time {
+            self.suspend_idle_notification = if let Some(time) = suspend_time {
+                Some(IdleNotification::new(&self.inner, time))
+            } else {
+                None
+            };
+            self.update_suspend_idle(false);
+        }
     }
 
     fn handle_event(&mut self, event: Event) {
