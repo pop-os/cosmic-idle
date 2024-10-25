@@ -193,11 +193,10 @@ impl State {
 
     fn recreate_notification(&mut self) {
         if self.screen_off_idle_notification.as_ref().map(|x| x.time) != self.conf.screen_off_time {
-            self.screen_off_idle_notification = if let Some(time) = self.conf.screen_off_time {
-                Some(IdleNotification::new(&self.inner, time))
-            } else {
-                None
-            };
+            self.screen_off_idle_notification = self
+                .conf
+                .screen_off_time
+                .map(|time| IdleNotification::new(&self.inner, time));
             self.update_screen_off_idle(false);
         }
         let suspend_time = if self.on_battery {
@@ -206,11 +205,8 @@ impl State {
             self.conf.suspend_on_ac_time
         };
         if self.suspend_idle_notification.as_ref().map(|x| x.time) != suspend_time {
-            self.suspend_idle_notification = if let Some(time) = suspend_time {
-                Some(IdleNotification::new(&self.inner, time))
-            } else {
-                None
-            };
+            self.suspend_idle_notification =
+                suspend_time.map(|time| IdleNotification::new(&self.inner, time));
             self.update_suspend_idle(false);
         }
     }
