@@ -6,7 +6,10 @@ use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use futures_lite::stream::StreamExt;
 use keyframe::{ease, functions::EaseInOut};
-use std::time::{Duration, Instant};
+use std::{
+    process::Command,
+    time::{Duration, Instant},
+};
 use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
@@ -137,11 +140,13 @@ struct State {
     inner: StateInner,
     outputs: Vec<Output>,
     conf: CosmicIdleConfig,
-    idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
+    screen_off_idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
+    suspend_idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
+    on_battery: bool,
 }
 
 impl State {
-    fn update_idle(&mut self, is_idle: bool) {
+    fn update_screen_off_idle(&mut self, is_idle: bool) {
         for output in &mut self.outputs {
             if is_idle {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
@@ -152,24 +157,57 @@ impl State {
         }
     }
 
+    fn update_suspend_idle(&mut self, is_idle: bool) {
+        if is_idle {
+            // TODO: Make command configurable
+            match Command::new("systemctl").arg("suspend").status() {
+                Ok(status) if status.success() => {}
+                Ok(status) => {
+                    log::error!("suspend command failed with exit status {}", status)
+                }
+                Err(err) => log::error!("failed to run suspend command: {}", err),
+            }
+        }
+    }
+
     fn recreate_notification(&mut self) {
-        if let Some(idle_notification) = self.idle_notification.take() {
+        if let Some(idle_notification) = self.screen_off_idle_notification.take() {
+            idle_notification.destroy();
+        }
+        if let Some(idle_notification) = self.suspend_idle_notification.take() {
             idle_notification.destroy();
         }
         if let Some(time) = self.conf.screen_off_time {
-            self.idle_notification = Some(self.inner.idle_notifier.get_idle_notification(
+            self.screen_off_idle_notification =
+                Some(self.inner.idle_notifier.get_idle_notification(
+                    time,
+                    &self.inner.seat,
+                    &self.inner.qh,
+                    (),
+                ));
+        }
+        let suspend_time = if self.on_battery {
+            self.conf.suspend_on_battery_time
+        } else {
+            self.conf.suspend_on_ac_time
+        };
+        if let Some(time) = suspend_time {
+            self.suspend_idle_notification = Some(self.inner.idle_notifier.get_idle_notification(
                 time,
                 &self.inner.seat,
                 &self.inner.qh,
                 (),
             ));
         }
-        self.update_idle(false);
+        self.update_screen_off_idle(false);
+        self.update_suspend_idle(false);
     }
 
     fn handle_event(&mut self, event: Event) {
         match event {
-            Event::OnBattery(_value) => {}
+            Event::OnBattery(value) => {
+                self.on_battery = value;
+            }
         }
     }
 }
@@ -251,9 +289,11 @@ fn main() {
             seat,
             qh,
         },
-        idle_notification: None,
+        screen_off_idle_notification: None,
+        suspend_idle_notification: None,
         outputs,
         conf,
+        on_battery: false,
     };
     state.recreate_notification();
 
@@ -339,7 +379,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
 impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
     fn event(
         state: &mut Self,
-        _: &ext_idle_notification_v1::ExtIdleNotificationV1,
+        notification: &ext_idle_notification_v1::ExtIdleNotificationV1,
         event: ext_idle_notification_v1::Event,
         _: &(),
         _: &Connection,
@@ -350,7 +390,11 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             ext_idle_notification_v1::Event::Resumed => false,
             _ => unreachable!(),
         };
-        state.update_idle(is_idle);
+        if state.screen_off_idle_notification.as_ref() == Some(notification) {
+            state.update_screen_off_idle(is_idle);
+        } else if state.suspend_idle_notification.as_ref() == Some(notification) {
+            state.update_suspend_idle(is_idle);
+        }
     }
 }
 
