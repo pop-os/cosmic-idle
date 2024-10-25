@@ -39,6 +39,26 @@ enum Event {
     OnBattery(bool),
 }
 
+struct IdleNotification {
+    notification: ext_idle_notification_v1::ExtIdleNotificationV1,
+}
+
+impl IdleNotification {
+    fn new(inner: &StateInner, time: u32) -> Self {
+        let notification =
+            inner
+                .idle_notifier
+                .get_idle_notification(time, &inner.seat, &inner.qh, ());
+        Self { notification }
+    }
+}
+
+impl Drop for IdleNotification {
+    fn drop(&mut self) {
+        self.notification.destroy();
+    }
+}
+
 async fn receive_battery_task(sender: channel::Sender<Event>) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
     let upower = UPowerProxy::new(&connection).await?;
@@ -140,8 +160,8 @@ struct State {
     inner: StateInner,
     outputs: Vec<Output>,
     conf: CosmicIdleConfig,
-    screen_off_idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
-    suspend_idle_notification: Option<ext_idle_notification_v1::ExtIdleNotificationV1>,
+    screen_off_idle_notification: Option<IdleNotification>,
+    suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
 }
 
@@ -171,34 +191,21 @@ impl State {
     }
 
     fn recreate_notification(&mut self) {
-        if let Some(idle_notification) = self.screen_off_idle_notification.take() {
-            idle_notification.destroy();
-        }
-        if let Some(idle_notification) = self.suspend_idle_notification.take() {
-            idle_notification.destroy();
-        }
-        if let Some(time) = self.conf.screen_off_time {
-            self.screen_off_idle_notification =
-                Some(self.inner.idle_notifier.get_idle_notification(
-                    time,
-                    &self.inner.seat,
-                    &self.inner.qh,
-                    (),
-                ));
-        }
+        self.screen_off_idle_notification = if let Some(time) = self.conf.screen_off_time {
+            Some(IdleNotification::new(&self.inner, time))
+        } else {
+            None
+        };
         let suspend_time = if self.on_battery {
             self.conf.suspend_on_battery_time
         } else {
             self.conf.suspend_on_ac_time
         };
-        if let Some(time) = suspend_time {
-            self.suspend_idle_notification = Some(self.inner.idle_notifier.get_idle_notification(
-                time,
-                &self.inner.seat,
-                &self.inner.qh,
-                (),
-            ));
-        }
+        self.suspend_idle_notification = if let Some(time) = suspend_time {
+            Some(IdleNotification::new(&self.inner, time))
+        } else {
+            None
+        };
         self.update_screen_off_idle(false);
         self.update_suspend_idle(false);
     }
@@ -390,9 +397,19 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             ext_idle_notification_v1::Event::Resumed => false,
             _ => unreachable!(),
         };
-        if state.screen_off_idle_notification.as_ref() == Some(notification) {
+        if state
+            .screen_off_idle_notification
+            .as_ref()
+            .map(|x| &x.notification)
+            == Some(notification)
+        {
             state.update_screen_off_idle(is_idle);
-        } else if state.suspend_idle_notification.as_ref() == Some(notification) {
+        } else if state
+            .suspend_idle_notification
+            .as_ref()
+            .map(|x| &x.notification)
+            == Some(notification)
+        {
             state.update_suspend_idle(is_idle);
         }
     }
