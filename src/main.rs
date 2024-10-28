@@ -4,6 +4,7 @@ use calloop::{channel, EventLoop};
 use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
+use cosmic_settings_config::shortcuts;
 use futures_lite::stream::StreamExt;
 use keyframe::{ease, functions::EaseInOut};
 use std::{
@@ -164,6 +165,7 @@ struct State {
     screen_off_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
+    system_actions: shortcuts::SystemActions,
 }
 
 impl State {
@@ -181,7 +183,11 @@ impl State {
     fn update_suspend_idle(&mut self, is_idle: bool) {
         if is_idle {
             // TODO: Make command configurable
-            match Command::new("systemctl").arg("suspend").status() {
+            let command = self
+                .system_actions
+                .get(&shortcuts::action::System::Suspend)
+                .map_or("systemctl suspend", |s| s.as_str());
+            match Command::new("/bin/sh").arg("-c").arg(command).status() {
                 Ok(status) if status.success() => {}
                 Ok(status) => {
                     log::error!("suspend command failed with exit status {}", status)
@@ -286,6 +292,9 @@ fn main() {
         conf
     });
 
+    let shortcuts_config = shortcuts::context().unwrap();
+    let system_actions = shortcuts::system_actions(&shortcuts_config);
+
     let mut state = State {
         inner: StateInner {
             compositor,
@@ -302,6 +311,7 @@ fn main() {
         outputs,
         conf,
         on_battery: false,
+        system_actions,
     };
     state.recreate_notification();
 
