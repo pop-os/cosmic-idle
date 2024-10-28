@@ -6,6 +6,7 @@ use std::collections::HashMap;
 struct Inhibitor {
     application_name: String,
     reason_for_inhibit: String,
+    client: zbus::names::UniqueName<'static>,
 }
 
 #[derive(Default)]
@@ -16,15 +17,23 @@ pub struct Screensaver {
 
 #[zbus::interface(name = "org.freedesktop.ScreenSaver")]
 impl Screensaver {
-    fn inhibit(&mut self, application_name: String, reason_for_inhibit: String) -> u32 {
+    fn inhibit(
+        &mut self,
+        application_name: String,
+        reason_for_inhibit: String,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> u32 {
         self.last_cookie += 1;
-        self.inhibitors.insert(
-            self.last_cookie,
-            Inhibitor {
-                application_name,
-                reason_for_inhibit,
-            },
-        );
+        if let Some(sender) = header.sender() {
+            self.inhibitors.insert(
+                self.last_cookie,
+                Inhibitor {
+                    application_name,
+                    reason_for_inhibit,
+                    client: sender.to_owned(),
+                },
+            );
+        }
         self.last_cookie
     }
 
