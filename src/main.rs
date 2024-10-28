@@ -32,6 +32,8 @@ use wayland_protocols_wlr::{
     output_power_management::v1::client::{zwlr_output_power_manager_v1, zwlr_output_power_v1},
 };
 
+mod freedesktop_screensaver;
+
 const FADE_TIME: Duration = Duration::from_millis(2000);
 
 #[derive(Debug)]
@@ -238,7 +240,7 @@ fn main() {
     let seat = globals
         .bind::<wl_seat::WlSeat, _, _>(&qh, 1..=1, ())
         .unwrap();
-    seat.get_pointer(&qh, ()); // XXX
+    seat.get_pointer(&qh, ());
 
     let compositor = globals
         .bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=1, ())
@@ -327,6 +329,16 @@ fn main() {
         .schedule(async move {
             if let Err(err) = receive_battery_task(sender).await {
                 log::error!("Getting battery status from upower: {}", err);
+            }
+        })
+        .unwrap();
+    scheduler
+        .schedule(async {
+            if let Ok(connection) = zbus::Connection::session().await {
+                if let Err(err) = freedesktop_screensaver::serve(&connection).await {
+                    log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
+                }
+                std::future::pending::<()>().await;
             }
         })
         .unwrap();
