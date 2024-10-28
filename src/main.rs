@@ -179,8 +179,11 @@ impl State {
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
         if is_idle {
-            // TODO: Make command configurable
-            run_command("systemctl suspend".to_string());
+            let command = self
+                .system_actions
+                .get(&shortcuts::action::System::Suspend)
+                .map_or("systemctl suspend", |s| s.as_str());
+            crate::run_command(command.to_string());
         }
     }
 
