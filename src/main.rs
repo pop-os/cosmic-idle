@@ -4,6 +4,7 @@ use calloop::{channel, EventLoop};
 use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
+use cosmic_settings_config::shortcuts;
 use futures_lite::stream::StreamExt;
 use std::process::Command;
 use upower_dbus::UPowerProxy;
@@ -97,6 +98,25 @@ struct State {
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
     screensaver_inhibit: bool,
+    system_actions: shortcuts::SystemActions,
+}
+
+fn run_command(command: String) {
+    let mut child = match Command::new("/bin/sh").arg("-c").arg(&command).spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            log::error!("failed to execute command '{}': {}", command, err);
+            return;
+        }
+    };
+
+    std::thread::spawn(move || match child.wait() {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            log::error!("command '{}' failed with exit status {}", command, status)
+        }
+        Err(err) => log::error!("failed to wait on command '{}': {}", command, err),
+    });
 }
 
 impl State {
@@ -131,13 +151,7 @@ impl State {
     fn update_suspend_idle(&mut self, is_idle: bool) {
         if is_idle {
             // TODO: Make command configurable
-            match Command::new("systemctl").arg("suspend").status() {
-                Ok(status) if status.success() => {}
-                Ok(status) => {
-                    log::error!("suspend command failed with exit status {}", status)
-                }
-                Err(err) => log::error!("failed to run suspend command: {}", err),
-            }
+            run_command("systemctl suspend".to_string());
         }
     }
 
@@ -235,6 +249,9 @@ fn main() {
         conf
     });
 
+    let shortcuts_config = shortcuts::context().unwrap();
+    let system_actions = shortcuts::system_actions(&shortcuts_config);
+
     let mut state = State {
         inner: StateInner {
             registry: globals.registry().clone(),
@@ -253,6 +270,7 @@ fn main() {
         conf,
         on_battery: false,
         screensaver_inhibit: false,
+        system_actions,
     };
     globals.contents().with_list(|list| {
         for global in list {
