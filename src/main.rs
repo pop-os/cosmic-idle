@@ -338,7 +338,6 @@ fn main() {
                 if let Err(err) = freedesktop_screensaver::serve(&connection).await {
                     log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
                 }
-                std::future::pending::<()>().await;
             }
         })
         .unwrap();
