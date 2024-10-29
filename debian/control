@@ -18,4 +18,4 @@ Architecture: amd64 arm64
 Depends:
   ${misc:Depends},
   ${shlibs:Depends}
-Description: Cosmic OSD
+Description: Cosmic idle daemon
