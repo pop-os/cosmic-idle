@@ -118,9 +118,6 @@ impl State {
     }
 
     fn update_screen_off_idle(&mut self, is_idle: bool) {
-        if self.screensaver_inhibit {
-            return;
-        }
         for output in &mut self.outputs {
             if is_idle {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
@@ -132,9 +129,6 @@ impl State {
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
-        if self.screensaver_inhibit {
-            return;
-        }
         if is_idle {
             // TODO: Make command configurable
             match Command::new("systemctl").arg("suspend").status() {
@@ -148,8 +142,14 @@ impl State {
     }
 
     // If screen off or suspend idle times have changed, recreate idle notifications.
-    fn recreate_notification(&mut self) {
-        if self.screen_off_idle_notification.as_ref().map(|x| x.time) != self.conf.screen_off_time {
+    fn recreate_notifications(&mut self) {
+        let screen_off_time = if self.screensaver_inhibit {
+            None
+        } else {
+            self.conf.screen_off_time
+        };
+
+        if self.screen_off_idle_notification.as_ref().map(|x| x.time) != screen_off_time {
             self.screen_off_idle_notification = self
                 .conf
                 .screen_off_time
@@ -157,11 +157,15 @@ impl State {
             // Initially not idle; server sends `resumed` only after `idled`
             self.update_screen_off_idle(false);
         }
-        let suspend_time = if self.on_battery {
+
+        let suspend_time = if self.screensaver_inhibit {
+            None
+        } else if self.on_battery {
             self.conf.suspend_on_battery_time
         } else {
             self.conf.suspend_on_ac_time
         };
+
         if self.suspend_idle_notification.as_ref().map(|x| x.time) != suspend_time {
             self.suspend_idle_notification =
                 suspend_time.map(|time| IdleNotification::new(&self.inner, time));
@@ -177,6 +181,7 @@ impl State {
             }
             Event::ScreensaverInhibit(value) => {
                 self.screensaver_inhibit = value;
+                self.recreate_notifications();
             }
         }
     }
@@ -256,7 +261,7 @@ fn main() {
             }
         }
     });
-    state.recreate_notification();
+    state.recreate_notifications();
 
     let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
 
@@ -269,7 +274,7 @@ fn main() {
             .handle()
             .insert_source(source, |(config, keys), _, state| {
                 state.conf.update_keys(&config, &keys);
-                state.recreate_notification();
+                state.recreate_notifications();
             })
             .unwrap();
     }
