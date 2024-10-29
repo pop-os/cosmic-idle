@@ -88,6 +88,7 @@ pub async fn serve(conn: &zbus::Connection, event_sender: EventSender) -> zbus::
         )
         .await?;
 
+    // If a client disconnects from DBus, remove any inhibitors it has added.
     let dbus = zbus::fdo::DBusProxy::new(conn).await?;
     let mut name_owner_stream = dbus.receive_name_owner_changed().await?;
     while let Some(event) = name_owner_stream.next().await {

@@ -1,3 +1,5 @@
+// Layer shell surface that fades to black, before setting DPMS off.
+
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{

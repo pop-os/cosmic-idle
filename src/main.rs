@@ -147,12 +147,14 @@ impl State {
         }
     }
 
+    // If screen off or suspend idle times have changed, recreate idle notifications.
     fn recreate_notification(&mut self) {
         if self.screen_off_idle_notification.as_ref().map(|x| x.time) != self.conf.screen_off_time {
             self.screen_off_idle_notification = self
                 .conf
                 .screen_off_time
                 .map(|time| IdleNotification::new(&self.inner, time));
+            // Initially not idle; server sends `resumed` only after `idled`
             self.update_screen_off_idle(false);
         }
         let suspend_time = if self.on_battery {
@@ -163,6 +165,7 @@ impl State {
         if self.suspend_idle_notification.as_ref().map(|x| x.time) != suspend_time {
             self.suspend_idle_notification =
                 suspend_time.map(|time| IdleNotification::new(&self.inner, time));
+            // Initially not idle; server sends `resumed` only after `idled`
             self.update_suspend_idle(false);
         }
     }
