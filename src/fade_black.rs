@@ -2,7 +2,7 @@ use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
     delegate_noop,
-    protocol::{wl_buffer, wl_callback, wl_output, wl_surface},
+    protocol::{wl_buffer, wl_callback, wl_pointer, wl_output, wl_surface},
     Connection, Dispatch, QueueHandle,
 };
 use wayland_protocols::wp::{
@@ -142,6 +142,31 @@ impl Dispatch<wl_callback::WlCallback, wl_surface::WlSurface> for State {
                         }
                     }
                 }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for State {
+    fn event(
+        _: &mut Self,
+        pointer: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter {
+                serial,
+                surface: _,
+                surface_x: _,
+                surface_y: _,
+            } => {
+                // The only surface in our client is `FadeBlackSurface`.
+                // So hide the cursor if entered.
+                pointer.set_cursor(serial, None, 0, 0);
             }
             _ => {}
         }

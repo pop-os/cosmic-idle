@@ -5,12 +5,14 @@ use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use futures_lite::stream::StreamExt;
-use std::process::Command;
+use std::{
+    process::Command,
+};
 use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat},
+    protocol::{wl_compositor, wl_output, wl_registry, wl_seat},
     Connection, Dispatch, Proxy, QueueHandle,
 };
 use wayland_protocols::{
@@ -276,7 +278,10 @@ fn main() {
     scheduler
         .schedule(async move {
             if let Ok(connection) = zbus::Connection::session().await {
-                if let Err(err) = freedesktop_screensaver::serve(&connection, sender).await {
+                if let Err(err) =
+                    freedesktop_screensaver::serve(&connection, sender)
+                        .await
+                {
                     log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
                 }
             }
@@ -368,34 +373,11 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
     }
 }
 
-impl Dispatch<wl_pointer::WlPointer, ()> for State {
-    fn event(
-        _: &mut Self,
-        pointer: &wl_pointer::WlPointer,
-        event: wl_pointer::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_pointer::Event::Enter {
-                serial,
-                surface: _,
-                surface_x: _,
-                surface_y: _,
-            } => {
-                pointer.set_cursor(serial, None, 0, 0);
-            }
-            _ => {}
-        }
-    }
-}
-
 delegate_noop!(State: ignore wl_output::WlOutput);
 delegate_noop!(State: zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1);
 delegate_noop!(State: ignore zwlr_output_power_v1::ZwlrOutputPowerV1);
 delegate_noop!(State: ext_idle_notifier_v1::ExtIdleNotifierV1);
-delegate_noop!(State: ignore wl_seat::WlSeat); // XXX
+delegate_noop!(State: ignore wl_seat::WlSeat); // TODO: Capabilties
 delegate_noop!(State: zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(State: wp_viewporter::WpViewporter);
 delegate_noop!(State: wp_viewport::WpViewport);
