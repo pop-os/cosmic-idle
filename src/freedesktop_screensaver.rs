@@ -42,7 +42,7 @@ impl Screensaver {
             );
             let mut inhibitors = self.inhibitors.lock().unwrap();
             if inhibitors.is_empty() {
-                let _ = self.event_sender.send(Event::ScreensaverInhibit(false));
+                let _ = self.event_sender.send(Event::ScreensaverInhibit(true));
             }
             inhibitors.push(Inhibitor {
                 cookie,
@@ -58,6 +58,9 @@ impl Screensaver {
         let mut inhibitors = self.inhibitors.lock().unwrap();
         if let Some(idx) = inhibitors.iter().position(|x| x.cookie == cookie) {
             let inhibitor = inhibitors.remove(idx);
+            if inhibitors.is_empty() {
+                let _ = self.event_sender.send(Event::ScreensaverInhibit(false));
+            }
             log::info!(
                 "Removed screensaver inhibitor for application '{}' {:?}, reason: {}, cookie: {}",
                 inhibitor.application_name,
