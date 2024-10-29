@@ -5,10 +5,7 @@ use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use futures_lite::stream::StreamExt;
-use std::{
-    process::Command,
-    sync::{Arc, Mutex},
-};
+use std::process::Command;
 use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
@@ -35,7 +32,10 @@ mod freedesktop_screensaver;
 #[derive(Debug)]
 enum Event {
     OnBattery(bool),
+    ScreensaverInhibit(bool),
 }
+
+type EventSender = channel::Sender<Event>;
 
 struct IdleNotification {
     notification: ext_idle_notification_v1::ExtIdleNotificationV1,
@@ -58,7 +58,7 @@ impl Drop for IdleNotification {
     }
 }
 
-async fn receive_battery_task(sender: channel::Sender<Event>) -> zbus::Result<()> {
+async fn receive_battery_task(sender: EventSender) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
     let upower = UPowerProxy::new(&connection).await?;
     let mut stream = upower.receive_on_battery_changed().await;
@@ -95,12 +95,12 @@ struct State {
     screen_off_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
-    screensaver_inhibitors: Arc<Mutex<Vec<freedesktop_screensaver::Inhibitor>>>,
+    screensaver_inhibit: bool,
 }
 
 impl State {
     fn update_screen_off_idle(&mut self, is_idle: bool) {
-        if !self.screensaver_inhibitors.lock().unwrap().is_empty() {
+        if self.screensaver_inhibit {
             return;
         }
         for output in &mut self.outputs {
@@ -114,7 +114,7 @@ impl State {
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
-        if !self.screensaver_inhibitors.lock().unwrap().is_empty() {
+        if self.screensaver_inhibit {
             return;
         }
         if is_idle {
@@ -153,6 +153,9 @@ impl State {
         match event {
             Event::OnBattery(value) => {
                 self.on_battery = value;
+            }
+            Event::ScreensaverInhibit(value) => {
+                self.screensaver_inhibit = value;
             }
         }
     }
@@ -224,8 +227,6 @@ fn main() {
         conf
     });
 
-    let screensaver_inhibitors = Arc::new(Mutex::new(Vec::new()));
-
     let mut state = State {
         inner: StateInner {
             compositor,
@@ -242,7 +243,7 @@ fn main() {
         outputs,
         conf,
         on_battery: false,
-        screensaver_inhibitors: screensaver_inhibitors.clone(),
+        screensaver_inhibit: false,
     };
     state.recreate_notification();
 
@@ -264,9 +265,10 @@ fn main() {
 
     let (executor, scheduler) = calloop::futures::executor().unwrap();
     let (sender, receiver) = channel::channel();
+    let sender_clone = sender.clone();
     scheduler
         .schedule(async move {
-            if let Err(err) = receive_battery_task(sender).await {
+            if let Err(err) = receive_battery_task(sender_clone).await {
                 log::error!("Getting battery status from upower: {}", err);
             }
         })
@@ -274,9 +276,7 @@ fn main() {
     scheduler
         .schedule(async move {
             if let Ok(connection) = zbus::Connection::session().await {
-                if let Err(err) =
-                    freedesktop_screensaver::serve(&connection, screensaver_inhibitors).await
-                {
+                if let Err(err) = freedesktop_screensaver::serve(&connection, sender).await {
                     log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
                 }
             }

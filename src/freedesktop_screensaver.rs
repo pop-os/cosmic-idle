@@ -7,6 +7,8 @@ use std::sync::{
     Arc, Mutex,
 };
 
+use crate::{Event, EventSender};
+
 #[derive(Debug)]
 pub struct Inhibitor {
     cookie: u32,
@@ -18,6 +20,7 @@ pub struct Inhibitor {
 pub struct Screensaver {
     inhibitors: Arc<Mutex<Vec<Inhibitor>>>,
     last_cookie: AtomicU32,
+    event_sender: EventSender,
 }
 
 #[zbus::interface(name = "org.freedesktop.ScreenSaver")]
@@ -37,7 +40,11 @@ impl Screensaver {
                 reason_for_inhibit,
                 cookie
             );
-            self.inhibitors.lock().unwrap().push(Inhibitor {
+            let mut inhibitors = self.inhibitors.lock().unwrap();
+            if inhibitors.is_empty() {
+                let _ = self.event_sender.send(Event::ScreensaverInhibit(false));
+            }
+            inhibitors.push(Inhibitor {
                 cookie,
                 application_name,
                 reason_for_inhibit,
@@ -62,10 +69,9 @@ impl Screensaver {
     }
 }
 
-pub async fn serve(
-    conn: &zbus::Connection,
-    inhibitors: Arc<Mutex<Vec<Inhibitor>>>,
-) -> zbus::Result<()> {
+pub async fn serve(conn: &zbus::Connection, event_sender: EventSender) -> zbus::Result<()> {
+    let inhibitors = Arc::new(Mutex::new(Vec::new()));
+
     conn.request_name_with_flags(
         "org.freedesktop.ScreenSaver",
         zbus::fdo::RequestNameFlags::ReplaceExisting.into(),
@@ -76,6 +82,7 @@ pub async fn serve(
             "/org/freedesktop/ScreenSaver",
             Screensaver {
                 inhibitors: inhibitors.clone(),
+                event_sender: event_sender.clone(),
                 last_cookie: AtomicU32::new(0),
             },
         )
@@ -87,10 +94,13 @@ pub async fn serve(
         let args = event.args()?;
         if args.new_owner.is_none() {
             if let zbus::names::BusName::Unique(name) = args.name {
-                inhibitors
-                    .lock()
-                    .unwrap()
-                    .retain(|inhibitor| inhibitor.client != name);
+                let mut inhibitors = inhibitors.lock().unwrap();
+                if !inhibitors.is_empty() {
+                    inhibitors.retain(|inhibitor| inhibitor.client != name);
+                    if inhibitors.is_empty() {
+                        let _ = event_sender.send(Event::ScreensaverInhibit(false));
+                    }
+                }
             }
         }
     }
