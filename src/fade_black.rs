@@ -2,7 +2,7 @@ use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
     delegate_noop,
-    protocol::{wl_buffer, wl_callback, wl_pointer, wl_output, wl_surface},
+    protocol::{wl_buffer, wl_callback, wl_output, wl_pointer, wl_surface},
     Connection, Dispatch, QueueHandle,
 };
 use wayland_protocols::wp::{

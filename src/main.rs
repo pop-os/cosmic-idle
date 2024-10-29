@@ -5,9 +5,7 @@ use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use futures_lite::stream::StreamExt;
-use std::{
-    process::Command,
-};
+use std::process::Command;
 use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
@@ -80,6 +78,7 @@ struct Output {
 
 // Immutate references to globals, needed for calls
 struct StateInner {
+    registry: wl_registry::WlRegistry,
     output_power_manager: zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1,
     compositor: wl_compositor::WlCompositor,
     layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
@@ -101,6 +100,23 @@ struct State {
 }
 
 impl State {
+    fn add_output_global(&mut self, global_name: u32, version: u32) {
+        let output = self
+            .inner
+            .registry
+            .bind(global_name, version.min(3), &self.inner.qh, ());
+        let output_power =
+            self.inner
+                .output_power_manager
+                .get_output_power(&output, &self.inner.qh, ());
+        self.outputs.push(Output {
+            output,
+            output_power,
+            fade_surface: None,
+            global_name,
+        });
+    }
+
     fn update_screen_off_idle(&mut self, is_idle: bool) {
         if self.screensaver_inhibit {
             return;
@@ -203,24 +219,6 @@ fn main() {
         )
         .unwrap();
 
-    let outputs = globals.contents().with_list(|list| {
-        list.iter()
-            .filter(|global| global.interface == wl_output::WlOutput::interface().name)
-            .map(|global| {
-                let output = globals
-                    .registry()
-                    .bind(global.name, global.version.min(3), &qh, ());
-                let output_power = output_power_manager.get_output_power(&output, &qh, ());
-                Output {
-                    output,
-                    output_power,
-                    fade_surface: None,
-                    global_name: global.name,
-                }
-            })
-            .collect()
-    });
-
     let config = cosmic_config::Config::new("com.system76.CosmicIdle", 1).unwrap();
     let conf = CosmicIdleConfig::get_entry(&config).unwrap_or_else(|(errs, conf)| {
         for err in errs {
@@ -231,6 +229,7 @@ fn main() {
 
     let mut state = State {
         inner: StateInner {
+            registry: globals.registry().clone(),
             compositor,
             output_power_manager,
             layer_shell,
@@ -242,11 +241,18 @@ fn main() {
         },
         screen_off_idle_notification: None,
         suspend_idle_notification: None,
-        outputs,
+        outputs: Vec::new(),
         conf,
         on_battery: false,
         screensaver_inhibit: false,
     };
+    globals.contents().with_list(|list| {
+        for global in list {
+            if global.interface == wl_output::WlOutput::interface().name {
+                state.add_output_global(global.name, global.version);
+            }
+        }
+    });
     state.recreate_notification();
 
     let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
@@ -278,10 +284,7 @@ fn main() {
     scheduler
         .schedule(async move {
             if let Ok(connection) = zbus::Connection::session().await {
-                if let Err(err) =
-                    freedesktop_screensaver::serve(&connection, sender)
-                        .await
-                {
+                if let Err(err) = freedesktop_screensaver::serve(&connection, sender).await {
                     log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
                 }
             }
@@ -306,11 +309,11 @@ fn main() {
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
     fn event(
         state: &mut Self,
-        registry: &wl_registry::WlRegistry,
+        _: &wl_registry::WlRegistry,
         event: wl_registry::Event,
         _: &GlobalListContents,
         _: &Connection,
-        qh: &QueueHandle<Self>,
+        _: &QueueHandle<Self>,
     ) {
         match event {
             wl_registry::Event::Global {
@@ -319,18 +322,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
                 version,
             } => {
                 if interface == "wl_output" {
-                    let output = registry.bind(name, version.min(3), qh, ());
-                    let output_power =
-                        state
-                            .inner
-                            .output_power_manager
-                            .get_output_power(&output, &qh, ());
-                    state.outputs.push(Output {
-                        output,
-                        output_power,
-                        fade_surface: None,
-                        global_name: name,
-                    });
+                    state.add_output_global(name, version);
                 }
             }
             wl_registry::Event::GlobalRemove { name } => {
