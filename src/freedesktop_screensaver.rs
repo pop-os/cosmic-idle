@@ -30,6 +30,13 @@ impl Screensaver {
     ) -> u32 {
         let cookie = self.last_cookie.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some(sender) = header.sender() {
+            log::info!(
+                "Added screensaver inhibitor for application '{}' {:?}, reason: {}, cookie: {}",
+                application_name,
+                sender,
+                reason_for_inhibit,
+                cookie
+            );
             self.inhibitors.lock().unwrap().push(Inhibitor {
                 cookie,
                 application_name,
@@ -43,7 +50,14 @@ impl Screensaver {
     fn un_inhibit(&mut self, cookie: u32) {
         let mut inhibitors = self.inhibitors.lock().unwrap();
         if let Some(idx) = inhibitors.iter().position(|x| x.cookie == cookie) {
-            inhibitors.remove(idx);
+            let inhibitor = inhibitors.remove(idx);
+            log::info!(
+                "Removed screensaver inhibitor for application '{}' {:?}, reason: {}, cookie: {}",
+                inhibitor.application_name,
+                inhibitor.client,
+                inhibitor.reason_for_inhibit,
+                inhibitor.cookie
+            );
         }
     }
 }
