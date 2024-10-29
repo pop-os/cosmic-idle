@@ -8,7 +8,7 @@ use std::sync::{
 };
 
 #[derive(Debug)]
-struct Inhibitor {
+pub struct Inhibitor {
     cookie: u32,
     application_name: String,
     reason_for_inhibit: String,
@@ -62,9 +62,10 @@ impl Screensaver {
     }
 }
 
-pub async fn serve(conn: &zbus::Connection) -> zbus::Result<()> {
-    let inhibitors = Arc::new(Mutex::new(Vec::new()));
-
+pub async fn serve(
+    conn: &zbus::Connection,
+    inhibitors: Arc<Mutex<Vec<Inhibitor>>>,
+) -> zbus::Result<()> {
     conn.request_name_with_flags(
         "org.freedesktop.ScreenSaver",
         zbus::fdo::RequestNameFlags::ReplaceExisting.into(),

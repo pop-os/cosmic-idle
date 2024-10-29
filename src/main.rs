@@ -8,6 +8,7 @@ use futures_lite::stream::StreamExt;
 use keyframe::{ease, functions::EaseInOut};
 use std::{
     process::Command,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use upower_dbus::UPowerProxy;
@@ -148,6 +149,7 @@ struct Output {
     global_name: u32,
 }
 
+// Immutate references to globals, needed for calls
 struct StateInner {
     output_power_manager: zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1,
     compositor: wl_compositor::WlCompositor,
@@ -166,10 +168,14 @@ struct State {
     screen_off_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
+    screensaver_inhibitors: Arc<Mutex<Vec<freedesktop_screensaver::Inhibitor>>>,
 }
 
 impl State {
     fn update_screen_off_idle(&mut self, is_idle: bool) {
+        if !self.screensaver_inhibitors.lock().unwrap().is_empty() {
+            return;
+        }
         for output in &mut self.outputs {
             if is_idle {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
@@ -181,6 +187,9 @@ impl State {
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
+        if !self.screensaver_inhibitors.lock().unwrap().is_empty() {
+            return;
+        }
         if is_idle {
             // TODO: Make command configurable
             match Command::new("systemctl").arg("suspend").status() {
@@ -288,6 +297,8 @@ fn main() {
         conf
     });
 
+    let screensaver_inhibitors = Arc::new(Mutex::new(Vec::new()));
+
     let mut state = State {
         inner: StateInner {
             compositor,
@@ -304,6 +315,7 @@ fn main() {
         outputs,
         conf,
         on_battery: false,
+        screensaver_inhibitors: screensaver_inhibitors.clone(),
     };
     state.recreate_notification();
 
@@ -333,9 +345,11 @@ fn main() {
         })
         .unwrap();
     scheduler
-        .schedule(async {
+        .schedule(async move {
             if let Ok(connection) = zbus::Connection::session().await {
-                if let Err(err) = freedesktop_screensaver::serve(&connection).await {
+                if let Err(err) =
+                    freedesktop_screensaver::serve(&connection, screensaver_inhibitors).await
+                {
                     log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
                 }
             }
