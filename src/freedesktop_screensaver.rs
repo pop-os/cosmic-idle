@@ -17,9 +17,10 @@ pub struct Inhibitor {
     client: zbus::names::UniqueName<'static>,
 }
 
-pub struct Screensaver {
+#[derive(Clone)]
+struct Screensaver {
     inhibitors: Arc<Mutex<Vec<Inhibitor>>>,
-    last_cookie: AtomicU32,
+    last_cookie: Arc<AtomicU32>,
     event_sender: EventSender,
 }
 
@@ -80,15 +81,18 @@ pub async fn serve(conn: &zbus::Connection, event_sender: EventSender) -> zbus::
         zbus::fdo::RequestNameFlags::ReplaceExisting.into(),
     )
     .await?;
-    conn.object_server()
-        .at(
-            "/org/freedesktop/ScreenSaver",
-            Screensaver {
-                inhibitors: inhibitors.clone(),
-                event_sender: event_sender.clone(),
-                last_cookie: AtomicU32::new(0),
-            },
-        )
+    let screensaver = Screensaver {
+        inhibitors: inhibitors.clone(),
+        event_sender: event_sender.clone(),
+        last_cookie: Arc::new(AtomicU32::new(0)),
+    };
+    // Clients vary in which path they use
+    let object_server = conn.object_server();
+    object_server
+        .at("/ScreenSaver", screensaver.clone())
+        .await?;
+    object_server
+        .at("/org/freedesktop/ScreenSaver", screensaver)
         .await?;
 
     // If a client disconnects from DBus, remove any inhibitors it has added.
