@@ -137,6 +137,11 @@ impl Dispatch<wl_callback::WlCallback, wl_surface::WlSurface> for State {
                                     .output_power
                                     .set_mode(zwlr_output_power_v1::Mode::Off);
                                 output.fade_surface = None;
+
+                                // All outputs are done fading
+                                if state.outputs.iter().all(|o| o.fade_surface.is_none()) {
+                                    state.fade_done();
+                                }
                             } else {
                                 fade_surface.update(&state.inner);
                             }
