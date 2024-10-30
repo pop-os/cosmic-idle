@@ -291,10 +291,8 @@ fn main() {
         .unwrap();
     scheduler
         .schedule(async move {
-            if let Ok(connection) = zbus::Connection::session().await {
-                if let Err(err) = freedesktop_screensaver::serve(&connection, sender).await {
-                    log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
-                }
+            if let Err(err) = freedesktop_screensaver::serve(sender).await {
+                log::error!("failed to serve FreeDesktop screensaver interface: {}", err);
             }
         })
         .unwrap();

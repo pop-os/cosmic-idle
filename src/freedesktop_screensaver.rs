@@ -73,30 +73,29 @@ impl Screensaver {
     }
 }
 
-pub async fn serve(conn: &zbus::Connection, event_sender: EventSender) -> zbus::Result<()> {
+pub async fn serve(event_sender: EventSender) -> zbus::Result<()> {
     let inhibitors = Arc::new(Mutex::new(Vec::new()));
 
-    conn.request_name_with_flags(
-        "org.freedesktop.ScreenSaver",
-        zbus::fdo::RequestNameFlags::ReplaceExisting.into(),
-    )
-    .await?;
     let screensaver = Screensaver {
         inhibitors: inhibitors.clone(),
         event_sender: event_sender.clone(),
         last_cookie: Arc::new(AtomicU32::new(0)),
     };
+
     // Clients vary in which path they use
-    let object_server = conn.object_server();
-    object_server
-        .at("/ScreenSaver", screensaver.clone())
+    let conn = zbus::connection::Builder::session()?
+        .serve_at("/ScreenSaver", screensaver.clone())?
+        .serve_at("/org/freedesktop/ScreenSaver", screensaver)?
+        .build()
         .await?;
-    object_server
-        .at("/org/freedesktop/ScreenSaver", screensaver)
-        .await?;
+    conn.request_name_with_flags(
+        "org.freedesktop.ScreenSaver",
+        zbus::fdo::RequestNameFlags::ReplaceExisting.into(),
+    )
+    .await?;
 
     // If a client disconnects from DBus, remove any inhibitors it has added.
-    let dbus = zbus::fdo::DBusProxy::new(conn).await?;
+    let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
     let mut name_owner_stream = dbus.receive_name_owner_changed().await?;
     while let Some(event) = name_owner_stream.next().await {
         let args = event.args()?;
