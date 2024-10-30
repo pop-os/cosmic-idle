@@ -150,6 +150,13 @@ impl State {
 
     // Fade surfaces on all outputs have finished fading out
     fn fade_done(&mut self) {
+        for output in &mut self.outputs {
+            output
+                .output_power
+                .set_mode(zwlr_output_power_v1::Mode::Off);
+            output.fade_surface = None;
+        }
+
         if let Some(command) = self
             .system_actions
             .get(&shortcuts::action::System::LockScreen)
