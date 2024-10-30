@@ -14,9 +14,9 @@ pub struct CosmicIdleConfig {
 impl Default for CosmicIdleConfig {
     fn default() -> Self {
         Self {
-            screen_off_time: Some(10 * 60 * 1000),
-            suspend_on_battery_time: Some(20 * 60 * 1000),
-            suspend_on_ac_time: Some(20 * 60 * 1000),
+            screen_off_time: Some(15 * 60 * 1000),
+            suspend_on_battery_time: Some(15 * 60 * 1000),
+            suspend_on_ac_time: Some(30 * 60 * 1000),
         }
     }
 }
