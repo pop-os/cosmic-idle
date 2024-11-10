@@ -15,7 +15,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 
 use crate::{State, StateInner};
 
-const FADE_TIME: Duration = Duration::from_millis(2000);
+const FADE_TIME: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct FadeBlackSurface {
