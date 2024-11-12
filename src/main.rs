@@ -181,10 +181,8 @@ impl State {
         };
 
         if self.screen_off_idle_notification.as_ref().map(|x| x.time) != screen_off_time {
-            self.screen_off_idle_notification = self
-                .conf
-                .screen_off_time
-                .map(|time| IdleNotification::new(&self.inner, time));
+            self.screen_off_idle_notification =
+                screen_off_time.map(|time| IdleNotification::new(&self.inner, time));
             // Initially not idle; server sends `resumed` only after `idled`
             self.update_screen_off_idle(false);
         }
