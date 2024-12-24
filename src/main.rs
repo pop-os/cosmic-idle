@@ -1,12 +1,12 @@
 #![allow(clippy::single_match)]
 
-use calloop::{channel, EventLoop};
+use calloop::{channel, timer, EventLoop};
 use calloop_wayland_source::WaylandSource;
 use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use cosmic_settings_config::shortcuts;
 use futures_lite::stream::StreamExt;
-use std::process::Command;
+use std::{process::Command, time::Duration};
 use upower_dbus::UPowerProxy;
 use wayland_client::{
     delegate_noop,
@@ -29,6 +29,9 @@ use wayland_protocols_wlr::{
 mod fade_black;
 use fade_black::FadeBlackSurface;
 mod freedesktop_screensaver;
+
+// Delay between screen off and locking
+const LOCK_SCREEN_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 enum Event {
@@ -99,6 +102,7 @@ struct State {
     on_battery: bool,
     screensaver_inhibit: bool,
     system_actions: shortcuts::SystemActions,
+    loop_handle: calloop::LoopHandle<'static, Self>,
 }
 
 fn run_command(command: String) {
@@ -157,6 +161,16 @@ impl State {
             output.fade_surface = None;
         }
 
+        let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
+        self.loop_handle
+            .insert_source(timer, |_, _, state| {
+                state.lock_screen();
+                timer::TimeoutAction::Drop
+            })
+            .unwrap();
+    }
+
+    fn lock_screen(&self) {
         if let Some(command) = self
             .system_actions
             .get(&shortcuts::action::System::LockScreen)
@@ -267,6 +281,8 @@ fn main() {
     let shortcuts_config = shortcuts::context().unwrap();
     let system_actions = shortcuts::system_actions(&shortcuts_config);
 
+    let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
+
     let mut state = State {
         inner: StateInner {
             registry: globals.registry().clone(),
@@ -286,6 +302,7 @@ fn main() {
         on_battery: false,
         screensaver_inhibit: false,
         system_actions,
+        loop_handle: event_loop.handle(),
     };
     globals.contents().with_list(|list| {
         for global in list {
@@ -295,8 +312,6 @@ fn main() {
         }
     });
     state.recreate_notifications();
-
-    let mut event_loop: EventLoop<State> = EventLoop::try_new().unwrap();
 
     WaylandSource::new(connection, event_queue)
         .insert(event_loop.handle())
