@@ -171,12 +171,11 @@ impl State {
     }
 
     fn lock_screen(&self) {
-        if let Some(command) = self
+        let command = self
             .system_actions
             .get(&shortcuts::action::System::LockScreen)
-        {
-            crate::run_command(command.to_string());
-        }
+            .map_or("loginctl lock-session", |s| s.as_str());
+        crate::run_command(command.to_string());
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
