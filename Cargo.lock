@@ -486,7 +486,7 @@ dependencies = [
  "known-folders",
  "notify",
  "once_cell",
- "ron",
+ "ron 0.8.1",
  "serde",
  "tracing",
  "xdg",
@@ -532,9 +532,10 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#61c76a9d060827402eeb9fe92cae73ce159d66e5"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon?branch=suspend#9ad71221175358c7317540a81380cdb4fc97cd5e"
 dependencies = [
  "cosmic-config",
+ "ron 0.9.0-alpha.1",
  "serde",
  "serde_with",
  "thiserror",
@@ -1680,6 +1681,19 @@ dependencies = [
  "bitflags 2.6.0",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "ron"
+version = "0.9.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7644a2a539ff7fa991c8f4652373cd722d387e39229415103243914249730836"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.6.0",
+ "serde",
+ "serde_derive",
+ "unicode-ident",
 ]
 
 [[package]]
