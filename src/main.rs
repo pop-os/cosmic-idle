@@ -356,7 +356,7 @@ fn main() {
         })
         .unwrap();
 
-    while let Ok(_) = event_loop.dispatch(None, &mut state) {}
+    while event_loop.dispatch(None, &mut state).is_ok() {}
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {

@@ -99,14 +99,14 @@ pub async fn serve(event_sender: EventSender) -> zbus::Result<()> {
     let mut name_owner_stream = dbus.receive_name_owner_changed().await?;
     while let Some(event) = name_owner_stream.next().await {
         let args = event.args()?;
-        if args.new_owner.is_none() {
-            if let zbus::names::BusName::Unique(name) = args.name {
-                let mut inhibitors = inhibitors.lock().unwrap();
-                if !inhibitors.is_empty() {
-                    inhibitors.retain(|inhibitor| inhibitor.client != name);
-                    if inhibitors.is_empty() {
-                        let _ = event_sender.send(Event::ScreensaverInhibit(false));
-                    }
+        if args.new_owner.is_none()
+            && let zbus::names::BusName::Unique(name) = args.name
+        {
+            let mut inhibitors = inhibitors.lock().unwrap();
+            if !inhibitors.is_empty() {
+                inhibitors.retain(|inhibitor| inhibitor.client != name);
+                if inhibitors.is_empty() {
+                    let _ = event_sender.send(Event::ScreensaverInhibit(false));
                 }
             }
         }
