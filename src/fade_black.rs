@@ -101,12 +101,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for State {
                 height,
             } => {
                 for output in &mut state.outputs {
-                    if let Some(fade_surface) = &mut output.fade_surface {
-                        if &fade_surface.layer_surface == obj {
-                            fade_surface.layer_surface.ack_configure(serial);
-                            fade_surface.configure(&state.inner, width, height);
-                            break;
-                        }
+                    if let Some(fade_surface) = &mut output.fade_surface
+                        && &fade_surface.layer_surface == obj
+                    {
+                        fade_surface.layer_surface.ack_configure(serial);
+                        fade_surface.configure(&state.inner, width, height);
+                        break;
                     }
                 }
             }
@@ -127,23 +127,23 @@ impl Dispatch<wl_callback::WlCallback, wl_surface::WlSurface> for State {
         match event {
             wl_callback::Event::Done { callback_data: _ } => {
                 for output in &mut state.outputs {
-                    if let Some(fade_surface) = &mut output.fade_surface {
-                        if &fade_surface.surface == surface {
-                            if fade_surface.is_done() {
-                                // All outputs are done fading
-                                if state
-                                    .outputs
-                                    .iter()
-                                    .flat_map(|o| o.fade_surface.as_ref())
-                                    .all(|s| s.is_done())
-                                {
-                                    state.fade_done();
-                                }
-                            } else {
-                                fade_surface.update(&state.inner);
+                    if let Some(fade_surface) = &mut output.fade_surface
+                        && &fade_surface.surface == surface
+                    {
+                        if fade_surface.is_done() {
+                            // All outputs are done fading
+                            if state
+                                .outputs
+                                .iter()
+                                .flat_map(|o| o.fade_surface.as_ref())
+                                .all(|s| s.is_done())
+                            {
+                                state.fade_done();
                             }
-                            break;
+                        } else {
+                            fade_surface.update(&state.inner);
                         }
+                        break;
                     }
                 }
             }
