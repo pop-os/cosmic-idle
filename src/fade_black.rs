@@ -3,9 +3,8 @@
 use keyframe::{ease, functions::EaseInOut};
 use std::time::{Duration, Instant};
 use wayland_client::{
-    delegate_noop,
+    Connection, Dispatch, QueueHandle, delegate_noop,
     protocol::{wl_buffer, wl_callback, wl_output, wl_pointer, wl_surface},
-    Connection, Dispatch, QueueHandle,
 };
 use wayland_protocols::wp::{
     single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1,

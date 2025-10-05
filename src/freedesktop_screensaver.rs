@@ -3,8 +3,8 @@
 
 use futures_lite::StreamExt;
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU32, Ordering},
 };
 
 use crate::{Event, EventSender};

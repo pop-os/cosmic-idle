@@ -1,23 +1,23 @@
 [package]
 name = "cosmic-idle"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 keyframe = "1.1.1"
-wayland-client = "0.31.5"
-wayland-protocols = { version = "0.32.3", features = ["client", "staging"] }
-wayland-protocols-wlr = { version = "0.3.3", features = ["client"] }
+wayland-client = "0.31.11"
+wayland-protocols = { version = "0.32.9", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3.9", features = ["client"] }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = ["calloop"] }
 cosmic-idle-config = { path = "./cosmic-idle-config" }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
-calloop = { version = "0.14.0", features = ["executor"] }
-calloop-wayland-source = "0.4.0"
-log = "0.4.22"
-env_logger = "0.11.5"
+calloop = { version = "0.14.3", features = ["executor"] }
+calloop-wayland-source = "0.4.1"
+log = "0.4.28"
+env_logger = "0.11.8"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings" }
-zbus = "4.0.0"
-futures-lite = "2.3.0"
+zbus = "5.12"
+futures-lite = "2.6.1"
 
 [workspace]
 members = [
