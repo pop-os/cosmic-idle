@@ -1,18 +1,17 @@
 #![allow(clippy::single_match)]
 
-use calloop::{channel, timer, EventLoop};
+use calloop::{EventLoop, channel, timer};
 use calloop_wayland_source::WaylandSource;
-use cosmic_config::{calloop::ConfigWatchSource, CosmicConfigEntry};
+use cosmic_config::{CosmicConfigEntry, calloop::ConfigWatchSource};
 use cosmic_idle_config::CosmicIdleConfig;
 use cosmic_settings_config::shortcuts;
 use futures_lite::stream::StreamExt;
 use std::{process::Command, time::Duration};
 use upower_dbus::UPowerProxy;
 use wayland_client::{
-    delegate_noop,
-    globals::{registry_queue_init, GlobalListContents},
+    Connection, Dispatch, Proxy, QueueHandle, delegate_noop,
+    globals::{GlobalListContents, registry_queue_init},
     protocol::{wl_compositor, wl_output, wl_registry, wl_seat},
-    Connection, Dispatch, Proxy, QueueHandle,
 };
 use wayland_protocols::{
     ext::idle_notify::v1::client::{ext_idle_notification_v1, ext_idle_notifier_v1},
