@@ -102,6 +102,7 @@ struct State {
     screensaver_inhibit: bool,
     system_actions: shortcuts::SystemActions,
     loop_handle: calloop::LoopHandle<'static, Self>,
+    is_idle: bool,
 }
 
 fn run_command(command: String) {
@@ -132,6 +133,11 @@ impl State {
             self.inner
                 .output_power_manager
                 .get_output_power(&output, &self.inner.qh, ());
+
+        if self.is_idle {
+            // XXX fade?
+            output_power.set_mode(zwlr_output_power_v1::Mode::Off);
+        }
         self.outputs.push(Output {
             output,
             output_power,
@@ -149,6 +155,7 @@ impl State {
                 output.output_power.set_mode(zwlr_output_power_v1::Mode::On);
             }
         }
+        self.is_idle = is_idle;
     }
 
     // Fade surfaces on all outputs have finished fading out
@@ -304,6 +311,7 @@ fn main() {
         screensaver_inhibit: false,
         system_actions,
         loop_handle: event_loop.handle(),
+        is_idle: false,
     };
     globals.contents().with_list(|list| {
         for global in list {
