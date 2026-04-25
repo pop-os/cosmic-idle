@@ -25,6 +25,7 @@ use wayland_protocols_wlr::{
     output_power_management::v1::client::{zwlr_output_power_manager_v1, zwlr_output_power_v1},
 };
 
+mod dim;
 mod fade_black;
 use fade_black::FadeBlackSurface;
 mod freedesktop_screensaver;
@@ -98,6 +99,8 @@ struct State {
     conf: CosmicIdleConfig,
     screen_off_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
+    dim_idle_notification: Option<IdleNotification>,
+    dim_state: dim::DimState,
     on_battery: bool,
     screensaver_inhibit: bool,
     system_actions: shortcuts::SystemActions,
@@ -149,6 +152,10 @@ impl State {
                 output.output_power.set_mode(zwlr_output_power_v1::Mode::On);
             }
         }
+        if !is_idle {
+            // Screen turned back on — restore any dim state
+            self.dim_state.restore(self.conf.dim_fade_ms);
+        }
     }
 
     // Fade surfaces on all outputs have finished fading out
@@ -159,6 +166,11 @@ impl State {
                 .set_mode(zwlr_output_power_v1::Mode::Off);
             output.fade_surface = None;
         }
+
+        // Screen is now dark. Silently snap the backlight value back to its
+        // pre-dim original so the hardware holds the correct value across the
+        // power-off/on cycle (otherwise it would resume at the dimmed value).
+        self.dim_state.snap_restore();
 
         let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
         self.loop_handle
@@ -175,6 +187,14 @@ impl State {
             .get(&shortcuts::action::System::LockScreen)
             .map_or("loginctl lock-session", |s| s.as_str());
         crate::run_command(command.to_string());
+    }
+
+    fn update_dim_idle(&mut self, is_idle: bool) {
+        if is_idle {
+            self.dim_state.start_dim(self.conf.dim_target_percent, self.conf.dim_fade_ms);
+        } else {
+            self.dim_state.restore(self.conf.dim_fade_ms);
+        }
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
@@ -215,6 +235,18 @@ impl State {
                 suspend_time.map(|time| IdleNotification::new(&self.inner, time));
             // Initially not idle; server sends `resumed` only after `idled`
             self.update_suspend_idle(false);
+        }
+
+        // Dim notification — disable if screensaver is inhibited
+        let dim_time = if self.screensaver_inhibit {
+            None
+        } else {
+            self.conf.dim_time
+        };
+        if self.dim_idle_notification.as_ref().map(|x| x.time) != dim_time {
+            self.dim_idle_notification =
+                dim_time.map(|time| IdleNotification::new(&self.inner, time));
+            self.update_dim_idle(false);
         }
     }
 
@@ -298,6 +330,8 @@ fn main() {
         },
         screen_off_idle_notification: None,
         suspend_idle_notification: None,
+        dim_idle_notification: None,
+        dim_state: dim::DimState::new(),
         outputs: Vec::new(),
         conf,
         on_battery: false,
@@ -416,6 +450,13 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             == Some(notification)
         {
             state.update_suspend_idle(is_idle);
+        } else if state
+            .dim_idle_notification
+            .as_ref()
+            .map(|x| &x.notification)
+            == Some(notification)
+        {
+            state.update_dim_idle(is_idle);
         }
     }
 }

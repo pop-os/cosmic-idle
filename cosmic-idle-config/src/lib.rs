@@ -9,6 +9,12 @@ pub struct CosmicIdleConfig {
     pub suspend_on_battery_time: Option<u32>,
     /// Suspend idle time when on ac, in ms
     pub suspend_on_ac_time: Option<u32>,
+    /// Time of inactivity before display is dimmed, in ms. None disables dim.
+    pub dim_time: Option<u32>,
+    /// Percent of current brightness to dim to (0-100). Default 20.
+    pub dim_target_percent: u8,
+    /// Duration of the brightness fade, in ms. Default 2000.
+    pub dim_fade_ms: u32,
 }
 
 impl Default for CosmicIdleConfig {
@@ -17,6 +23,9 @@ impl Default for CosmicIdleConfig {
             screen_off_time: Some(15 * 60 * 1000),
             suspend_on_battery_time: Some(15 * 60 * 1000),
             suspend_on_ac_time: Some(30 * 60 * 1000),
+            dim_time: Some(30 * 1000),
+            dim_target_percent: 7,
+            dim_fade_ms: 300,
         }
     }
 }
