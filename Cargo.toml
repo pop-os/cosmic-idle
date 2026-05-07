@@ -18,6 +18,7 @@ env_logger = "0.11.8"
 upower_dbus = { git = "https://github.com/pop-os/dbus-settings-bindings" }
 zbus = "5.12"
 futures-lite = "2.6.1"
+logind-zbus = "5"
 
 [workspace]
 members = [

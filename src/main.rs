@@ -36,6 +36,7 @@ const LOCK_SCREEN_DELAY: Duration = Duration::from_millis(500);
 enum Event {
     OnBattery(bool),
     ScreensaverInhibit(bool),
+    SessionLocked,
 }
 
 type EventSender = channel::Sender<Event>;
@@ -71,6 +72,28 @@ async fn receive_battery_task(sender: EventSender) -> zbus::Result<()> {
     Ok(())
 }
 
+// Listen for the logind Lock signal to detect external session locks
+// (e.g. keyboard shortcut, loginctl lock-session). Unlock is detected
+// internally via the Resumed idle notification event instead, since
+// COSMIC's screen locker doesn't emit the Unlock D-Bus signal.
+async fn receive_lock_signal_task(sender: EventSender) -> zbus::Result<()> {
+    let connection = zbus::Connection::system().await?;
+    let manager = logind_zbus::manager::ManagerProxy::new(&connection).await?;
+    let session_id = std::env::var("XDG_SESSION_ID").unwrap_or_else(|_| "auto".to_string());
+    let session_path = manager.get_session(&session_id).await?;
+
+    let session = logind_zbus::session::SessionProxy::builder(&connection)
+        .path(session_path)?
+        .build()
+        .await?;
+
+    let mut lock_stream = session.receive_lock().await?;
+    while lock_stream.next().await.is_some() {
+        let _ = sender.send(Event::SessionLocked);
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 struct Output {
     output: wl_output::WlOutput,
@@ -100,6 +123,7 @@ struct State {
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
     screensaver_inhibit: bool,
+    session_locked: bool,
     system_actions: shortcuts::SystemActions,
     loop_handle: calloop::LoopHandle<'static, Self>,
 }
@@ -160,6 +184,13 @@ impl State {
             output.fade_surface = None;
         }
 
+        if !self.session_locked {
+            // Pre-empt the Lock signal so the shorter timeout is active during
+            // the brief window before logind delivers it.
+            self.session_locked = true;
+            self.recreate_notifications();
+        }
+
         let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
         self.loop_handle
             .insert_source(timer, |_, _, state| {
@@ -191,6 +222,8 @@ impl State {
     fn recreate_notifications(&mut self) {
         let screen_off_time = if self.screensaver_inhibit {
             None
+        } else if self.session_locked {
+            self.conf.screen_off_time_locked.or(self.conf.screen_off_time)
         } else {
             self.conf.screen_off_time
         };
@@ -199,7 +232,10 @@ impl State {
             self.screen_off_idle_notification =
                 screen_off_time.map(|time| IdleNotification::new(&self.inner, time));
             // Initially not idle; server sends `resumed` only after `idled`
-            self.update_screen_off_idle(false);
+            // When session is locked (screen already off), don't turn screen on.
+            if !self.session_locked {
+                self.update_screen_off_idle(false);
+            }
         }
 
         let suspend_time = if self.screensaver_inhibit {
@@ -225,6 +261,10 @@ impl State {
             }
             Event::ScreensaverInhibit(value) => {
                 self.screensaver_inhibit = value;
+                self.recreate_notifications();
+            }
+            Event::SessionLocked => {
+                self.session_locked = true;
                 self.recreate_notifications();
             }
         }
@@ -302,6 +342,7 @@ fn main() {
         conf,
         on_battery: false,
         screensaver_inhibit: false,
+        session_locked: false,
         system_actions,
         loop_handle: event_loop.handle(),
     };
@@ -335,6 +376,14 @@ fn main() {
         .schedule(async move {
             if let Err(err) = receive_battery_task(sender_clone).await {
                 log::error!("Getting battery status from upower: {}", err);
+            }
+        })
+        .unwrap();
+    let sender_clone = sender.clone();
+    scheduler
+        .schedule(async move {
+            if let Err(err) = receive_lock_signal_task(sender_clone).await {
+                log::error!("failed to listen for session lock signal: {}", err);
             }
         })
         .unwrap();
@@ -409,6 +458,12 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             == Some(notification)
         {
             state.update_screen_off_idle(is_idle);
+            // When user becomes active again, clear the locked state so
+            // the normal (longer) screen-off timeout is used.
+            if !is_idle && state.session_locked {
+                state.session_locked = false;
+                state.recreate_notifications();
+            }
         } else if state
             .suspend_idle_notification
             .as_ref()
