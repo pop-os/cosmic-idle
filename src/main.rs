@@ -237,19 +237,31 @@ impl State {
         // on wake (after lock_screen fires) so the desktop stays hidden
         // during the wake-to-lockscreen transition.
 
-        // Save current backlight, write 0. Same path as before; covers the
-        // no-dim case via saved_panel_brightness. dim_state.snap_restore is
-        // intentionally NOT called — leaving dim_state intact lets
-        // dim_state.restore on wake animate brightness up to the user's
-        // pre-dim original.
+        // Save current backlight, write 0. CRITICAL: only save if dim wasn't
+        // already active. If dim is active, the current brightness is the
+        // *dimmed* value (e.g. 7% of original) and dim_state already holds
+        // the user's pre-dim original — dim_state.restore on wake animates
+        // from 0 up to the original. If we ALSO saved the dimmed value
+        // here, the saved-brightness restore on wake would write the dimmed
+        // value AFTER dim_state.restore's fade thread completed, leaving
+        // the panel stuck dim. Saving only when dim is inactive means:
+        //   - dim active path: dim_state.restore handles full restore
+        //   - no-dim path: saved_panel_brightness handles full restore
+        // No two paths racing for the same panel.
         if let Some((device, current, _)) = dim::read_backlight() {
-            self.saved_panel_brightness = Some(current);
+            if self.dim_state.is_dimmed() {
+                log::info!(
+                    "[SCREEN-OFF] dim already active — skipping save (dim_state will handle wake restore)"
+                );
+            } else {
+                self.saved_panel_brightness = Some(current);
+            }
             if let Err(e) = dim::set_brightness_via_logind(&device, 0) {
                 log::warn!("[SCREEN-OFF] failed to write backlight=0: {e:?}");
             } else {
                 log::info!(
-                    "[SCREEN-OFF] backlight on {} dropped to 0 (saved {} for restore)",
-                    device, current
+                    "[SCREEN-OFF] backlight on {} dropped to 0 (saved {} for restore, dim_active={})",
+                    device, current, self.dim_state.is_dimmed()
                 );
             }
         } else {
