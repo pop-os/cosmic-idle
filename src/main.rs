@@ -101,6 +101,15 @@ struct State {
     suspend_idle_notification: Option<IdleNotification>,
     dim_idle_notification: Option<IdleNotification>,
     dim_state: dim::DimState,
+    /// Pre-screen-off panel brightness, written to backlight on wake so the
+    /// panel comes back to whatever level it was at when the screen-off
+    /// timeout fired. Set in `fade_done` (just before writing 0 to the
+    /// backlight); consumed in `update_screen_off_idle(false)` on wake.
+    /// Use this instead of `dim_state.snap_restore` so the brightness path
+    /// covers the no-dim case (user has dim disabled or the timing
+    /// inverted) — without it, an undimmed user would wake with the panel
+    /// stuck at brightness=0 forever.
+    saved_panel_brightness: Option<u32>,
     on_battery: bool,
     screensaver_inhibit: bool,
     system_actions: shortcuts::SystemActions,
@@ -149,28 +158,78 @@ impl State {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
             } else {
                 output.fade_surface = None;
-                output.output_power.set_mode(zwlr_output_power_v1::Mode::On);
+                // No more set_mode(Off/On) on the wlr output_power protocol —
+                // we'd previously call set_mode(On) here as the wake signal,
+                // but we no longer call set_mode(Off) at fade_done either, so
+                // there's nothing to undo. The CRTC + planes + framebuffer +
+                // HDR state on cosmic-comp's side were never disturbed; the
+                // panel just had its backlight written to 0. See `fade_done`
+                // for why we use backlight rather than DPMS.
             }
         }
         if !is_idle {
-            // Screen turned back on — restore any dim state
+            // Screen turning back on — restore the panel backlight first
+            // (instant snap to pre-screen-off value), then let dim_state's
+            // normal restore animate brightness from there back to the
+            // user's configured target if dim was active.
+            if let Some(value) = self.saved_panel_brightness.take()
+                && let Some((device, _, _)) = dim::read_backlight()
+            {
+                if let Err(e) = dim::set_brightness_via_logind(&device, value) {
+                    log::debug!("[SCREEN-OFF] wake brightness restore failed: {e:?}");
+                } else {
+                    log::info!(
+                        "[SCREEN-OFF] wake: backlight restored to {} on {}",
+                        value, device
+                    );
+                }
+            }
             self.dim_state.restore(self.conf.dim_fade_ms);
         }
     }
 
     // Fade surfaces on all outputs have finished fading out
     fn fade_done(&mut self) {
+        // Tear down the fade-to-black overlay surfaces. The panel is at
+        // alpha=u32::MAX black at this point, so removing the overlay before
+        // the brightness-write below would briefly show the underlying
+        // desktop — but we write brightness=0 immediately after and the
+        // overlay-then-backlight order is fine because the overlay is still
+        // opaque black until the surface destroy is processed by cosmic-comp.
+        // (In practice the user perceives the fade as a single smooth
+        // transition into dark.)
         for output in &mut self.outputs {
-            output
-                .output_power
-                .set_mode(zwlr_output_power_v1::Mode::Off);
+            // No more set_mode(Off) — keep the CRTC / planes / framebuffer /
+            // HDR state on cosmic-comp's side fully intact. DPMS-off via the
+            // wlr_output_power protocol routes through cosmic-comp's
+            // compositor.clear() which on Intel xe + HDR breaks display
+            // recovery (panel stays black, requires hard reboot). Backlight
+            // write to 0 achieves the same user-visible "screen off" without
+            // touching any kernel display engine state.
             output.fade_surface = None;
         }
 
-        // Screen is now dark. Silently snap the backlight value back to its
-        // pre-dim original so the hardware holds the correct value across the
-        // power-off/on cycle (otherwise it would resume at the dimmed value).
-        self.dim_state.snap_restore();
+        // Save current backlight, write 0. The save covers the no-dim case
+        // (dim_state has no original_brightness if the user disabled dim);
+        // the wake path in update_screen_off_idle reads it back. We do NOT
+        // call dim_state.snap_restore here — leaving dim_state intact means
+        // dim_state.restore on wake will animate brightness up to the user's
+        // pre-dim original, just like before.
+        if let Some((device, current, _)) = dim::read_backlight() {
+            self.saved_panel_brightness = Some(current);
+            if let Err(e) = dim::set_brightness_via_logind(&device, 0) {
+                log::warn!("[SCREEN-OFF] failed to write backlight=0: {e:?}");
+            } else {
+                log::info!(
+                    "[SCREEN-OFF] backlight on {} dropped to 0 (saved {} for restore)",
+                    device, current
+                );
+            }
+        } else {
+            log::warn!(
+                "[SCREEN-OFF] no backlight device found — screen will not physically turn off"
+            );
+        }
 
         let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
         self.loop_handle
@@ -332,6 +391,7 @@ fn main() {
         suspend_idle_notification: None,
         dim_idle_notification: None,
         dim_state: dim::DimState::new(),
+        saved_panel_brightness: None,
         outputs: Vec::new(),
         conf,
         on_battery: false,

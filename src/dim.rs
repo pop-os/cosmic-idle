@@ -122,7 +122,7 @@ fn fade_thread(device: String, from: u32, to: u32, fade_ms: u32, cancel: Arc<Ato
 
 /// Returns (device_name, current_brightness, max_brightness) for the first
 /// backlight device found.
-fn read_backlight() -> Option<(String, u32, u32)> {
+pub(crate) fn read_backlight() -> Option<(String, u32, u32)> {
     let entries = fs::read_dir(SYSFS_BACKLIGHT_DIR).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -140,7 +140,7 @@ fn read_backlight() -> Option<(String, u32, u32)> {
     None
 }
 
-fn set_brightness_via_logind(device: &str, value: u32) -> zbus::Result<()> {
+pub(crate) fn set_brightness_via_logind(device: &str, value: u32) -> zbus::Result<()> {
     let conn = zbus::blocking::Connection::system()?;
     let proxy = zbus::blocking::Proxy::new(
         &conn,
