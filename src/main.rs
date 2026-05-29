@@ -25,12 +25,18 @@ use wayland_protocols_wlr::{
     output_power_management::v1::client::{zwlr_output_power_manager_v1, zwlr_output_power_v1},
 };
 
+mod dim;
 mod fade_black;
 use fade_black::FadeBlackSurface;
 mod freedesktop_screensaver;
 
-// Delay between screen off and locking
-const LOCK_SCREEN_DELAY: Duration = Duration::from_millis(500);
+// How long after we call lock_screen on wake before we destroy the
+// fade-to-black overlay surfaces. cosmic-greeter spawns asynchronously via
+// `loginctl lock-session`; until its session-lock surface is up there's
+// nothing covering the desktop, so we keep the opaque black overlay around
+// to hide the desktop until the lockscreen actually appears. 500ms is
+// plenty of head-room; cosmic-greeter typically takes 100-200ms.
+const FADE_OVERLAY_DESTROY_AFTER_LOCK: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 enum Event {
@@ -98,6 +104,23 @@ struct State {
     conf: CosmicIdleConfig,
     screen_off_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
+    dim_idle_notification: Option<IdleNotification>,
+    dim_state: dim::DimState,
+    /// Pre-screen-off panel brightness, written to backlight on wake so the
+    /// panel comes back to whatever level it was at when the screen-off
+    /// timeout fired. Set in `fade_done` (just before writing 0 to the
+    /// backlight); consumed in `update_screen_off_idle(false)` on wake.
+    /// Use this instead of `dim_state.snap_restore` so the brightness path
+    /// covers the no-dim case (user has dim disabled or the timing
+    /// inverted) — without it, an undimmed user would wake with the panel
+    /// stuck at brightness=0 forever.
+    saved_panel_brightness: Option<u32>,
+    /// Set in `fade_done`: a lock-session is owed when the user wakes the
+    /// screen. We defer locking from `fade_done` to wake so cosmic-greeter
+    /// (and Howdy face-auth via PAM) start with the panel actually on,
+    /// instead of firing during the off period and timing out before the
+    /// user is back at the screen.
+    lock_on_wake: bool,
     on_battery: bool,
     screensaver_inhibit: bool,
     system_actions: shortcuts::SystemActions,
@@ -144,29 +167,120 @@ impl State {
         for output in &mut self.outputs {
             if is_idle {
                 output.fade_surface = Some(FadeBlackSurface::new(&self.inner, &output.output));
+            }
+            // On wake (is_idle = false), we INTENTIONALLY do NOT destroy
+            // fade_surface here. cosmic-greeter is about to be spawned via
+            // lock_screen() below, but it takes 100-500ms to start; until
+            // the session-lock surface is up there's nothing on top of the
+            // desktop. Keeping the opaque black overlay alive hides the
+            // desktop during that transition, eliminating the security
+            // regression where a passerby could press a key and see the
+            // unlocked desktop briefly. The destroy is scheduled for
+            // FADE_OVERLAY_DESTROY_AFTER_LOCK after lock_screen fires.
+        }
+        if !is_idle {
+            // 1. Restore the panel backlight first so the lockscreen will
+            //    be visible when cosmic-greeter renders it. This is the
+            //    whole point of deferring the lock to wake — Howdy fires
+            //    as part of cosmic-greeter's PAM auth start, and Howdy
+            //    can't see a face if the panel is dark.
+            if let Some(value) = self.saved_panel_brightness.take()
+                && let Some((device, _, _)) = dim::read_backlight()
+            {
+                if let Err(e) = dim::set_brightness_via_logind(&device, value) {
+                    log::debug!("[SCREEN-OFF] wake brightness restore failed: {e:?}");
+                } else {
+                    log::info!(
+                        "[SCREEN-OFF] wake: backlight restored to {} on {}",
+                        value, device
+                    );
+                }
+            }
+            self.dim_state.restore(self.conf.dim_fade_ms);
+
+            // 2. If fade_done deferred a lock to wake, do it now. Lock
+            //    target is `loginctl lock-session` (configurable). The
+            //    fade_surface we kept alive in step (above) is hiding
+            //    the desktop while cosmic-greeter spins up.
+            if self.lock_on_wake {
+                self.lock_on_wake = false;
+                log::info!("[SCREEN-OFF] wake: triggering deferred lock_screen");
+                self.lock_screen();
+
+                // 3. Schedule fade_surface destroy for after cosmic-greeter
+                //    has had time to put up its session-lock surface. Once
+                //    the session lock is active, it covers everything below
+                //    (including layer-shell Overlay), so the user sees:
+                //    fade_surface (black) → lockscreen, no flash of desktop.
+                let timer = timer::Timer::from_duration(FADE_OVERLAY_DESTROY_AFTER_LOCK);
+                self.loop_handle
+                    .insert_source(timer, |_, _, state| {
+                        for output in &mut state.outputs {
+                            output.fade_surface = None;
+                        }
+                        timer::TimeoutAction::Drop
+                    })
+                    .unwrap();
             } else {
-                output.fade_surface = None;
-                output.output_power.set_mode(zwlr_output_power_v1::Mode::On);
+                // Wake from a non-idle code path (screensaver_inhibit toggle
+                // etc.) — no lock pending, just clean up the overlay now.
+                for output in &mut self.outputs {
+                    output.fade_surface = None;
+                }
             }
         }
     }
 
     // Fade surfaces on all outputs have finished fading out
     fn fade_done(&mut self) {
-        for output in &mut self.outputs {
-            output
-                .output_power
-                .set_mode(zwlr_output_power_v1::Mode::Off);
-            output.fade_surface = None;
+        // Keep fade_surface ALIVE — destroyed later in update_screen_off_idle
+        // on wake (after lock_screen fires) so the desktop stays hidden
+        // during the wake-to-lockscreen transition.
+
+        // Save current backlight, write 0. CRITICAL: only save if dim wasn't
+        // already active. If dim is active, the current brightness is the
+        // *dimmed* value (e.g. 7% of original) and dim_state already holds
+        // the user's pre-dim original — dim_state.restore on wake animates
+        // from 0 up to the original. If we ALSO saved the dimmed value
+        // here, the saved-brightness restore on wake would write the dimmed
+        // value AFTER dim_state.restore's fade thread completed, leaving
+        // the panel stuck dim. Saving only when dim is inactive means:
+        //   - dim active path: dim_state.restore handles full restore
+        //   - no-dim path: saved_panel_brightness handles full restore
+        // No two paths racing for the same panel.
+        if let Some((device, current, _)) = dim::read_backlight() {
+            if self.dim_state.is_dimmed() {
+                log::info!(
+                    "[SCREEN-OFF] dim already active — skipping save (dim_state will handle wake restore)"
+                );
+            } else {
+                self.saved_panel_brightness = Some(current);
+            }
+            if let Err(e) = dim::set_brightness_via_logind(&device, 0) {
+                log::warn!("[SCREEN-OFF] failed to write backlight=0: {e:?}");
+            } else {
+                log::info!(
+                    "[SCREEN-OFF] backlight on {} dropped to 0 (saved {} for restore, dim_active={})",
+                    device, current, self.dim_state.is_dimmed()
+                );
+            }
+        } else {
+            log::warn!(
+                "[SCREEN-OFF] no backlight device found — screen will not physically turn off"
+            );
         }
 
-        let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
-        self.loop_handle
-            .insert_source(timer, |_, _, state| {
-                state.lock_screen();
-                timer::TimeoutAction::Drop
-            })
-            .unwrap();
+        // Defer the lock-session call to wake. cosmic-greeter (and Howdy
+        // PAM auth via face recognition) will fire when the user is
+        // actually back at the screen, instead of firing during the off
+        // period and Howdy timing out (default ~5s) before the user
+        // returns. Without this, every wake from screen-off lands on a
+        // password-only lockscreen because Howdy already failed and PAM
+        // moved on.
+        self.lock_on_wake = true;
+        log::info!(
+            "[SCREEN-OFF] lock deferred to wake (so Howdy fires when panel is on)"
+        );
     }
 
     fn lock_screen(&self) {
@@ -175,6 +289,14 @@ impl State {
             .get(&shortcuts::action::System::LockScreen)
             .map_or("loginctl lock-session", |s| s.as_str());
         crate::run_command(command.to_string());
+    }
+
+    fn update_dim_idle(&mut self, is_idle: bool) {
+        if is_idle {
+            self.dim_state.start_dim(self.conf.dim_target_percent, self.conf.dim_fade_ms);
+        } else {
+            self.dim_state.restore(self.conf.dim_fade_ms);
+        }
     }
 
     fn update_suspend_idle(&mut self, is_idle: bool) {
@@ -215,6 +337,18 @@ impl State {
                 suspend_time.map(|time| IdleNotification::new(&self.inner, time));
             // Initially not idle; server sends `resumed` only after `idled`
             self.update_suspend_idle(false);
+        }
+
+        // Dim notification — disable if screensaver is inhibited
+        let dim_time = if self.screensaver_inhibit {
+            None
+        } else {
+            self.conf.dim_time
+        };
+        if self.dim_idle_notification.as_ref().map(|x| x.time) != dim_time {
+            self.dim_idle_notification =
+                dim_time.map(|time| IdleNotification::new(&self.inner, time));
+            self.update_dim_idle(false);
         }
     }
 
@@ -298,6 +432,10 @@ fn main() {
         },
         screen_off_idle_notification: None,
         suspend_idle_notification: None,
+        dim_idle_notification: None,
+        dim_state: dim::DimState::new(),
+        saved_panel_brightness: None,
+        lock_on_wake: false,
         outputs: Vec::new(),
         conf,
         on_battery: false,
@@ -416,6 +554,13 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             == Some(notification)
         {
             state.update_suspend_idle(is_idle);
+        } else if state
+            .dim_idle_notification
+            .as_ref()
+            .map(|x| &x.notification)
+            == Some(notification)
+        {
+            state.update_dim_idle(is_idle);
         }
     }
 }
