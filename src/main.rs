@@ -222,6 +222,7 @@ impl State {
         match event {
             Event::OnBattery(value) => {
                 self.on_battery = value;
+                self.recreate_notifications();
             }
             Event::ScreensaverInhibit(value) => {
                 self.screensaver_inhibit = value;
