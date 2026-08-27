@@ -64,6 +64,7 @@ impl Drop for IdleNotification {
 async fn receive_battery_task(sender: EventSender) -> zbus::Result<()> {
     let connection = zbus::Connection::system().await?;
     let upower = UPowerProxy::new(&connection).await?;
+    let _ = sender.send(Event::OnBattery(upower.on_battery().await?));
     let mut stream = upower.receive_on_battery_changed().await;
     while let Some(event) = stream.next().await {
         let _ = sender.send(Event::OnBattery(event.get().await?));
@@ -222,6 +223,7 @@ impl State {
         match event {
             Event::OnBattery(value) => {
                 self.on_battery = value;
+                self.recreate_notifications();
             }
             Event::ScreensaverInhibit(value) => {
                 self.screensaver_inhibit = value;
