@@ -97,6 +97,7 @@ struct State {
     outputs: Vec<Output>,
     conf: CosmicIdleConfig,
     screen_off_idle_notification: Option<IdleNotification>,
+    session_lock_idle_notification: Option<IdleNotification>,
     suspend_idle_notification: Option<IdleNotification>,
     on_battery: bool,
     screensaver_inhibit: bool,
@@ -151,6 +152,12 @@ impl State {
         }
     }
 
+    fn update_session_lock_idle(&mut self, is_idle: bool) {
+        if is_idle {
+            self.lock_screen();
+        }
+    }
+
     // Fade surfaces on all outputs have finished fading out
     fn fade_done(&mut self) {
         for output in &mut self.outputs {
@@ -160,13 +167,15 @@ impl State {
             output.fade_surface = None;
         }
 
-        let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
-        self.loop_handle
-            .insert_source(timer, |_, _, state| {
-                state.lock_screen();
-                timer::TimeoutAction::Drop
-            })
-            .unwrap();
+        if self.conf.lock_after_screen_off {
+            let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
+            self.loop_handle
+                .insert_source(timer, |_, _, state| {
+                    state.lock_screen();
+                    timer::TimeoutAction::Drop
+                })
+                .unwrap();
+        }
     }
 
     fn lock_screen(&self) {
@@ -200,6 +209,19 @@ impl State {
                 screen_off_time.map(|time| IdleNotification::new(&self.inner, time));
             // Initially not idle; server sends `resumed` only after `idled`
             self.update_screen_off_idle(false);
+        }
+
+        let session_lock_time = if self.screensaver_inhibit {
+            None
+        } else {
+            self.conf.session_lock_time
+        };
+
+        if self.session_lock_idle_notification.as_ref().map(|x| x.time) != session_lock_time {
+            self.session_lock_idle_notification =
+                session_lock_time.map(|time| IdleNotification::new(&self.inner, time));
+            // Initially not idle; server sends `resumed` only after `idled`
+            self.update_session_lock_idle(false);
         }
 
         let suspend_time = if self.screensaver_inhibit {
@@ -298,6 +320,7 @@ fn main() {
             qh,
         },
         screen_off_idle_notification: None,
+        session_lock_idle_notification: None,
         suspend_idle_notification: None,
         outputs: Vec::new(),
         conf,
@@ -410,6 +433,13 @@ impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for State {
             == Some(notification)
         {
             state.update_screen_off_idle(is_idle);
+        } else if state
+            .session_lock_idle_notification
+            .as_ref()
+            .map(|x| &x.notification)
+            == Some(notification)
+        {
+            state.update_session_lock_idle(is_idle);
         } else if state
             .suspend_idle_notification
             .as_ref()
