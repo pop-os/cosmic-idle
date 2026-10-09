@@ -160,13 +160,15 @@ impl State {
             output.fade_surface = None;
         }
 
-        let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
-        self.loop_handle
-            .insert_source(timer, |_, _, state| {
-                state.lock_screen();
-                timer::TimeoutAction::Drop
-            })
-            .unwrap();
+        if self.conf.lock_after_screen_off {
+            let timer = timer::Timer::from_duration(LOCK_SCREEN_DELAY);
+            self.loop_handle
+                .insert_source(timer, |_, _, state| {
+                    state.lock_screen();
+                    timer::TimeoutAction::Drop
+                })
+                .unwrap();
+        }
     }
 
     fn lock_screen(&self) {
