@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub struct CosmicIdleConfig {
     /// Screen off idle time, in ms
     pub screen_off_time: Option<u32>,
+    /// Whether to lock the session when the screen turns off
+    pub lock_after_screen_off: bool,
+    /// Session lock idle time, in ms
+    pub session_lock_time: Option<u32>,
     /// Suspend idle time when on battery, in ms
     pub suspend_on_battery_time: Option<u32>,
     /// Suspend idle time when on ac, in ms
@@ -15,6 +19,8 @@ impl Default for CosmicIdleConfig {
     fn default() -> Self {
         Self {
             screen_off_time: Some(15 * 60 * 1000),
+            lock_after_screen_off: true,
+            session_lock_time: None,
             suspend_on_battery_time: Some(15 * 60 * 1000),
             suspend_on_ac_time: Some(30 * 60 * 1000),
         }
