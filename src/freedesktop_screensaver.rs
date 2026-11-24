@@ -83,14 +83,14 @@ pub async fn serve(event_sender: EventSender) -> zbus::Result<()> {
     };
 
     // Clients vary in which path they use
-    let conn = zbus::connection::Builder::session()?
-        .serve_at("/ScreenSaver", screensaver.clone())?
-        .serve_at("/org/freedesktop/ScreenSaver", screensaver)?
+    let conn = zbus::connection::Builder::session()
+        .serve_at("/ScreenSaver", screensaver.clone())
+        .serve_at("/org/freedesktop/ScreenSaver", screensaver)
         .build()
         .await?;
     conn.request_name_with_flags(
         "org.freedesktop.ScreenSaver",
-        zbus::fdo::RequestNameFlags::ReplaceExisting.into(),
+        zbus::fdo::RequestNameFlags::REPLACE_EXISTING,
     )
     .await?;
 

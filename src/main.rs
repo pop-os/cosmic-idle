@@ -7,7 +7,7 @@ use cosmic_idle_config::CosmicIdleConfig;
 use cosmic_settings_config::shortcuts;
 use futures_lite::stream::StreamExt;
 use std::{process::Command, time::Duration};
-use upower_dbus::UPowerProxy;
+use upower_zbus::UPowerProxy;
 use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
